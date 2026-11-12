@@ -296,7 +296,9 @@ export function RouteMap({
                 ) : null,
               )}
               {runner && !reducedMotion() && (
-                <circle className="route-runner" r="4.5">
+                <g>
+                  <circle className="route-runner-halo" r="9" />
+                  <circle className="route-runner" r="4.5" />
                   <animateMotion
                     dur="7s"
                     repeatCount="indefinite"
@@ -305,7 +307,7 @@ export function RouteMap({
                     keyTimes="0;1"
                     keySplines="0.4 0 0.6 1"
                   />
-                </circle>
+                </g>
               )}
             </g>
           </svg>

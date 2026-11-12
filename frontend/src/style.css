@@ -239,11 +239,13 @@ button:disabled {
 .rail-text {
   display: none;
 }
-/* Liquid indicator: two blobs with different speeds, fused by the goo filter. */
+/* Sliding indicator. It used to be two blobs fused by an SVG goo filter
+   (filter: url(#goo)), but browsers do not invalidate the blurred filter
+   output when the blobs move, which left smeared trails behind the thumb.
+   Now a single thumb, no filter; the trailing blob is hidden. */
 .nav-goo {
   position: absolute;
   inset: 0;
-  filter: url(#goo);
   pointer-events: none;
 }
 .nav-goo i {
@@ -258,8 +260,7 @@ button:disabled {
   transition: transform 0.5s var(--ease-spring);
 }
 .nav-goo i:last-child {
-  scale: 0.76;
-  transition: transform 0.85s var(--ease-out);
+  display: none;
 }
 
 .topbar {
@@ -370,7 +371,6 @@ button:disabled {
 .tt-goo {
   position: absolute;
   inset: 3px;
-  filter: url(#goo);
   pointer-events: none;
 }
 .tt-goo i {
@@ -384,8 +384,7 @@ button:disabled {
   transition: transform 0.55s var(--ease-spring);
 }
 .tt-goo i:last-child {
-  scale: 0.7;
-  transition: transform 0.9s var(--ease-out);
+  display: none;
 }
 .theme-toggle[aria-checked="true"] .tt-goo i {
   transform: translateX(42px);
@@ -1045,7 +1044,6 @@ button:disabled {
 .seg-goo {
   position: absolute;
   inset: 4px;
-  filter: url(#goo);
   pointer-events: none;
 }
 .seg-goo i {
@@ -1057,8 +1055,7 @@ button:disabled {
   transition: transform 0.5s var(--ease-spring);
 }
 .seg-goo i:last-child {
-  scale: 0.8 0.7;
-  transition: transform 0.85s var(--ease-out);
+  display: none;
 }
 .seg button {
   position: relative;
@@ -1489,7 +1486,12 @@ button.tool:active {
   fill: var(--text);
   stroke: var(--cyan);
   stroke-width: 2.5;
-  filter: drop-shadow(0 0 6px var(--cyan));
+}
+/* Halo drawn as a plain circle: a CSS filter on an SMIL-moved element leaves
+   unrepainted trails in Chromium. */
+.route-runner-halo {
+  fill: var(--cyan);
+  opacity: 0.25;
 }
 .mk {
   position: absolute;
