@@ -319,19 +319,27 @@ export const post = (body?: unknown): RequestInit => ({
   method: "POST",
   ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
 });
+// A new declaration starts pre-filled with illustrative demo values (a trusted
+// demo shipper, consistent documents), so the walkthrough needs no typing: the
+// presenter changes one field to show a mismatch or the manual-review path.
 export function initialPayload(d: Detail): Payload {
+  const numbers: Record<string, string> = {
+    invoice: "INV",
+    packing_list: "PL",
+    transport: "CMR",
+  };
   return {
-    shipper: "",
-    consignee: "",
-    description: "",
+    shipper: "Demo Russian Exporter",
+    consignee: "Demo Iranian Importer",
+    description: "General machine parts",
     mass_kg: d.shipment.mass_kg,
-    value_usd: 0,
-    origin_country: "",
-    hs_code: "",
+    value_usd: 45000,
+    origin_country: "RU",
+    hs_code: "847990",
     container_id: d.shipment.container_id,
     documents: Object.keys(docs).map((kind) => ({
       kind,
-      number: "",
+      number: `${lookup(numbers, kind) ?? "DOC"}-${d.shipment.id}`,
       container_id: d.shipment.container_id,
       mass_kg: d.shipment.mass_kg,
     })),
