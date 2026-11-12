@@ -1,4 +1,6 @@
 import type React from "react";
+import { useEffect, useRef, useState } from "react";
+import { Minus, Plus, Scan } from "lucide-react";
 import type { HubPoint, Leg, Port, Route } from "../types";
 import {
   countries,
@@ -119,6 +121,43 @@ function smoothClosed(pts: P[]) {
   return d + "Z";
 }
 
+// Zoom is deliberately modest: the schematic is for orientation along the
+// route, not a general-purpose map. Zooming out past the default only gives a
+// little air; zooming in keeps the view centre near the route.
+const ZOOM_MIN = 0.8;
+const ZOOM_MAX = 3;
+const ZOOM_STEP = 1.4;
+// Degrees the view centre may leave the bounding box of the route's ports.
+const FOCUS_MARGIN = 0.6;
+const HOME = { z: 1, cx: LON_C * K, cy: LAT_C };
+type View = typeof HOME;
+type Box = { x0: number; x1: number; y0: number; y1: number };
+
+const clampTo = (v: number, lo: number, hi: number) =>
+  Math.min(hi, Math.max(lo, v));
+const mix = (a: number, b: number, t: number) => a + (b - a) * t;
+
+// At zoom <= 1 the view is pinned to the home centre. Between 1 and 1.5 the
+// allowed centre grows from that point to the route's box, so there is no jump
+// when zooming through 1.
+function clampView(v: View, focus: Box): View {
+  const z = clampTo(v.z, ZOOM_MIN, ZOOM_MAX);
+  const t = clampTo((z - 1) / 0.5, 0, 1);
+  return {
+    z,
+    cx: clampTo(
+      v.cx,
+      mix(HOME.cx, Math.min(HOME.cx, focus.x0 - FOCUS_MARGIN * K), t),
+      mix(HOME.cx, Math.max(HOME.cx, focus.x1 + FOCUS_MARGIN * K), t),
+    ),
+    cy: clampTo(
+      v.cy,
+      mix(HOME.cy, Math.min(HOME.cy, focus.y0 - FOCUS_MARGIN), t),
+      mix(HOME.cy, Math.max(HOME.cy, focus.y1 + FOCUS_MARGIN), t),
+    ),
+  };
+}
+
 export function RouteMap({
   ports,
   route,
@@ -145,16 +184,147 @@ export function RouteMap({
   );
   const ready = valid.length > 0 && w > 0 && h > PAD_TOP + PAD_BOTTOM;
   const innerH = h - PAD_TOP - PAD_BOTTOM;
-  const scale = ready
+  const baseScale = ready
     ? Math.min(
         w / ((ROI.lon1 - ROI.lon0) * K),
         innerH / (ROI.lat1 - ROI.lat0),
       )
     : 1;
   const midY = PAD_TOP + innerH / 2;
+
+  // Ports of the current route and its alternatives: the area the view may
+  // not drift away from.
+  const focusIds = new Set(
+    [route, ...alternatives].flatMap((r) =>
+      r.legs.flatMap((l) => [l.origin_id, l.destination_id]),
+    ),
+  );
+  const focusPorts = valid.filter((p) => focusIds.has(p.id));
+  const focusPts = (focusPorts.length ? focusPorts : valid).map((p) =>
+    iso(p.lon, p.lat),
+  );
+  const focus: Box = focusPts.length
+    ? {
+        x0: Math.min(...focusPts.map((p) => p.x)),
+        x1: Math.max(...focusPts.map((p) => p.x)),
+        y0: Math.min(...focusPts.map((p) => p.y)),
+        y1: Math.max(...focusPts.map((p) => p.y)),
+      }
+    : { x0: HOME.cx, x1: HOME.cx, y0: HOME.cy, y1: HOME.cy };
+
+  const [rawView, setRawView] = useState<View>(HOME);
+  const [dragging, setDragging] = useState(false);
+  // Clamped on every render, so a new shipment (new focus box) re-centres the
+  // view without an effect.
+  const view = clampView(rawView, focus);
+  const scale = baseScale * view.z;
+  const zoomed = Math.abs(view.z - 1) > 0.01 || view.cx !== HOME.cx || view.cy !== HOME.cy;
+  // Latest geometry for the native wheel listener and pointer handlers.
+  const live = useRef({ view, focus, baseScale, w, midY });
+  live.current = { view, focus, baseScale, w, midY };
+  const tween = useRef(0);
+  const drag = useRef<{ id: number; x: number; y: number } | null>(null);
+
+  const stopTween = () => {
+    if (tween.current) cancelAnimationFrame(tween.current);
+    tween.current = 0;
+  };
+  const jumpTo = (next: View) => {
+    stopTween();
+    setRawView(clampView(next, live.current.focus));
+  };
+  // Eased move for the buttons and double click; instant with reduced motion.
+  const glideTo = (next: View) => {
+    stopTween();
+    const from = live.current.view;
+    const to = clampView(next, live.current.focus);
+    if (reducedMotion()) return setRawView(to);
+    const t0 = performance.now();
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - t0) / 240);
+      const e = 1 - Math.pow(1 - p, 3);
+      setRawView({
+        z: from.z * Math.pow(to.z / from.z, e),
+        cx: mix(from.cx, to.cx, e),
+        cy: mix(from.cy, to.cy, e),
+      });
+      tween.current = p < 1 ? requestAnimationFrame(tick) : 0;
+    };
+    tween.current = requestAnimationFrame(tick);
+  };
+  // New view after zooming by `factor` around a pixel (default: the centre),
+  // keeping the map point under that pixel in place.
+  const zoomedAt = (factor: number, px?: number, py?: number): View => {
+    const g = live.current;
+    const z = clampTo(g.view.z * factor, ZOOM_MIN, ZOOM_MAX);
+    const s0 = g.baseScale * g.view.z;
+    const s1 = g.baseScale * z;
+    const dx = (px ?? g.w / 2) - g.w / 2;
+    const dy = (py ?? g.midY) - g.midY;
+    return {
+      z,
+      cx: g.view.cx + dx / s0 - dx / s1,
+      cy: g.view.cy - dy / s0 + dy / s1,
+    };
+  };
+  const local = (e: { clientX: number; clientY: number }) => {
+    const rect = ref.current?.getBoundingClientRect();
+    return { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) };
+  };
+
+  // Wheel zoom needs a non-passive listener to stop the page from scrolling.
+  // At a zoom limit the event is left alone, so the page scrolls as usual.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY === 0) return;
+      const g = live.current;
+      const factor = Math.exp(-clampTo(e.deltaY, -120, 120) * 0.0022);
+      const z = clampTo(g.view.z * factor, ZOOM_MIN, ZOOM_MAX);
+      if (Math.abs(z - g.view.z) < 1e-4) return;
+      e.preventDefault();
+      const p = local(e);
+      jumpTo(zoomedAt(z / g.view.z, p.x, p.y));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      stopTween();
+    };
+  }, []);
+
+  // Drag to pan with mouse or pen; touch keeps scrolling the page and uses
+  // the buttons instead.
+  const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.pointerType === "touch" || e.button !== 0 || live.current.view.z <= 1)
+      return;
+    stopTween();
+    drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(true);
+  };
+  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    const g = live.current;
+    const s = g.baseScale * g.view.z;
+    jumpTo({
+      z: g.view.z,
+      cx: g.view.cx - (e.clientX - d.x) / s,
+      cy: g.view.cy + (e.clientY - d.y) / s,
+    });
+    drag.current = { id: d.id, x: e.clientX, y: e.clientY };
+  };
+  const onPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (drag.current?.id !== e.pointerId) return;
+    drag.current = null;
+    setDragging(false);
+  };
+
   const toPx = (p: P): P => ({
-    x: w / 2 + (p.x - LON_C * K) * scale,
-    y: midY - (p.y - LAT_C) * scale,
+    x: w / 2 + (p.x - view.cx) * scale,
+    y: midY - (p.y - view.cy) * scale,
   });
   const at = (lon: number, lat: number) => toPx(iso(lon, lat));
   const f = (v: number) => v.toFixed(1);
@@ -189,15 +359,16 @@ export function RouteMap({
   });
 
   const lonSpan = w / 2 / (K * scale);
-  const latTop = LAT_C + midY / scale;
-  const latBottom = LAT_C - (h - midY) / scale;
-  const step = scale < 24 ? 4 : 2;
+  const lonC = view.cx / K;
+  const latTop = view.cy + midY / scale;
+  const latBottom = view.cy - (h - midY) / scale;
+  const step = scale < 24 ? 4 : scale < 78 ? 2 : 1;
   const meridians: number[] = [];
   const parallels: number[] = [];
   if (ready) {
     for (
-      let lon = Math.ceil((LON_C - lonSpan) / step) * step;
-      lon <= LON_C + lonSpan;
+      let lon = Math.ceil((lonC - lonSpan) / step) * step;
+      lon <= lonC + lonSpan;
       lon += step
     )
       meridians.push(lon);
@@ -219,7 +390,12 @@ export function RouteMap({
   );
 
   return (
-    <div className="map" ref={ref}>
+    <div
+      className={
+        "map" + (view.z > 1 ? " zoomable" : "") + (dragging ? " dragging" : "")
+      }
+      ref={ref}
+    >
       {!valid.length && <div className="map-empty">Координаты недоступны</div>}
       {ready && (
         <>
@@ -230,10 +406,18 @@ export function RouteMap({
             viewBox={`0 0 ${f(w)} ${f(h)}`}
             role="img"
             aria-label="Схема маршрута по координатам пунктов"
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onDoubleClick={(e) => {
+              const p = local(e);
+              glideTo(zoomedAt(ZOOM_STEP, p.x, p.y));
+            }}
           >
             <g className="map-grid">
               {meridians.map((lon) => {
-                const x = at(lon, LAT_C).x;
+                const x = at(lon, view.cy).x;
                 // Meridians sit close together; label every other one
                 // when there is no room for each.
                 const labelled =
@@ -250,7 +434,7 @@ export function RouteMap({
                 );
               })}
               {parallels.map((lat) => {
-                const y = at(LON_C, lat).y;
+                const y = at(lonC, lat).y;
                 return (
                   <g key={"p" + lat}>
                     <line x1={0} x2={w} y1={y} y2={y} />
@@ -429,6 +613,35 @@ export function RouteMap({
               </button>
             );
           })}
+          <div className="map-zoom" role="group" aria-label="Масштаб схемы">
+            <button
+              type="button"
+              aria-label="Приблизить"
+              title="Приблизить"
+              disabled={view.z >= ZOOM_MAX - 0.001}
+              onClick={() => glideTo(zoomedAt(ZOOM_STEP))}
+            >
+              <Plus size={16} />
+            </button>
+            <button
+              type="button"
+              aria-label="Отдалить"
+              title="Отдалить"
+              disabled={view.z <= ZOOM_MIN + 0.001}
+              onClick={() => glideTo(zoomedAt(1 / ZOOM_STEP))}
+            >
+              <Minus size={16} />
+            </button>
+            <button
+              type="button"
+              aria-label="Показать весь маршрут"
+              title="Показать весь маршрут"
+              disabled={!zoomed}
+              onClick={() => glideTo(HOME)}
+            >
+              <Scan size={16} />
+            </button>
+          </div>
         </>
       )}
     </div>

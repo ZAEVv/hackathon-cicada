@@ -1403,6 +1403,57 @@ button.tool:active {
 .map-svg {
   display: block;
 }
+/* Map zoom: wheel / double click / buttons, drag to pan once zoomed in. */
+.map-svg {
+  touch-action: pan-y;
+}
+.map.zoomable .map-svg {
+  cursor: grab;
+}
+.map.dragging .map-svg {
+  cursor: grabbing;
+}
+.map.dragging {
+  user-select: none;
+}
+.map-zoom {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--card);
+  overflow: hidden;
+}
+.map-zoom button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+.map-zoom button + button {
+  border-top: 1px solid var(--line);
+}
+.map-zoom button:disabled {
+  color: var(--muted);
+  opacity: 0.45;
+}
+.hoverable .map-zoom button:hover:not(:disabled) {
+  background: var(--card-2);
+  color: var(--text);
+}
+.map-zoom button:active:not(:disabled) {
+  background: var(--card-3);
+}
 .map-empty {
   height: 100%;
   display: grid;
