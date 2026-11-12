@@ -127,7 +127,8 @@ def test_preclearance_lifecycle_replay_audit_and_readiness_forecast(client):
     assert client.post(f"{SHIPMENT}/preclearance/submit", headers={**BROKER, "Idempotency-Key": "bad"}).status_code == 409
     assert client.post(f"{SHIPMENT}/preclearance/submit", headers=BROKER).status_code == 422
 
-    assert client.put(f"{SHIPMENT}/preclearance", json=declaration(), headers=BROKER).status_code == 200
+    # An untrusted shipper keeps this lifecycle on the manual-review path (see the auto tests below).
+    assert client.put(f"{SHIPMENT}/preclearance", json={**declaration(), "shipper": "Unlisted Trader"}, headers=BROKER).status_code == 200
     ready = client.post(f"{SHIPMENT}/preclearance/validate", headers=BROKER)
     assert ready.status_code == 200 and ready.json()["status"] == "ready"
     restored = client.get(SHIPMENT, headers=BROKER).json()
@@ -146,6 +147,45 @@ def test_preclearance_lifecycle_replay_audit_and_readiness_forecast(client):
     assert any(entry["action"] == "review" for entry in audit)
     verification = client.get(f"{SHIPMENT}/audit/verify", headers=REVIEWER).json()
     assert verification["valid"] and verification["entries_checked"] == len(audit)
+
+
+def _ready(client, **changes):
+    assert client.put(f"{SHIPMENT}/preclearance", json={**declaration(), **changes}, headers=BROKER).status_code == 200
+    assert client.post(f"{SHIPMENT}/preclearance/validate", headers=BROKER).json()["status"] == "ready"
+
+
+def test_trusted_declaration_is_auto_accepted_and_replays(client):
+    _ready(client)
+    headers = {**BROKER, "Idempotency-Key": "auto-1"}
+    first = client.post(f"{SHIPMENT}/preclearance/submit", headers=headers)
+    assert first.status_code == 200 and first.json()["status"] == "auto_accepted"
+    clearance = first.json()["clearance"]
+    assert clearance["decision"] == "auto_accepted" and clearance["ruleset_id"] == "demo-rules-v1"
+    assert all(r["passed"] for r in clearance["results"])
+    assert clearance["ruleset_hash"] == client.get("/api/preclearance/ruleset", headers=REVIEWER).json()["ruleset_hash"]
+    assert client.post(f"{SHIPMENT}/preclearance/submit", headers=headers).json() == first.json()
+    review = client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "demo_accepted"}, headers=REVIEWER)
+    assert review.status_code == 409
+    assert client.get(f"{SHIPMENT}/audit/verify", headers=REVIEWER).json()["valid"]
+    last = client.get(f"{SHIPMENT}/audit", headers=REVIEWER).json()[-1]
+    assert last["action"] == "submit" and last["payload"]["clearance"]["decision"] == "auto_accepted"
+
+
+@pytest.mark.parametrize("changes,rule", [({"shipper": "Unlisted Trader"}, "R4"), ({"hs_code": "930100"}, "R2")])
+def test_failed_rule_goes_to_manual_review_then_reviewer_decides(client, changes, rule):
+    _ready(client, **changes)
+    submitted = client.post(f"{SHIPMENT}/preclearance/submit", headers={**BROKER, "Idempotency-Key": "m-1"}).json()
+    assert submitted["status"] == "submitted" and submitted["clearance"]["decision"] == "manual_review"
+    assert [r["rule_id"] for r in submitted["clearance"]["results"] if not r["passed"]] == [rule]
+    reviewed = client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "demo_accepted"}, headers=REVIEWER)
+    assert reviewed.status_code == 200 and reviewed.json()["status"] == "demo_accepted"
+
+
+def test_ruleset_endpoint_requires_auth_and_lists_rules(client):
+    assert_unauthorized(client.get("/api/preclearance/ruleset"))
+    body = client.get("/api/preclearance/ruleset", headers=BROKER).json()
+    assert body["id"] == "demo-rules-v1" and len(body["ruleset_hash"]) == 64
+    assert [r["id"] for r in body["rules"]] == ["R1", "R2", "R3", "R4", "R5"]
 
 
 # --- authentication -------------------------------------------------------

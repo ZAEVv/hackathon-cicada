@@ -74,6 +74,19 @@ export type Declaration = {
   };
   content_hash: string;
   updated_at: string;
+  clearance?: Clearance | null;
+};
+export type RuleResult = { rule_id: string; passed: boolean; detail: string };
+export type Clearance = {
+  ruleset_id: string;
+  ruleset_hash: string;
+  decision: "auto_accepted" | "manual_review";
+  results: RuleResult[];
+};
+export type Ruleset = {
+  id: string;
+  ruleset_hash: string;
+  rules: { id: string; description: string; parameters: Record<string, unknown> }[];
 };
 export type Detail = {
   simulation_now: string;

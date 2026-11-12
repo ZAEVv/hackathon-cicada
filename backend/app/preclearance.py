@@ -68,7 +68,9 @@ _DECLARATION_KEYS = frozenset({"id", "shipment_id", "version", "status", "payloa
                                "content_hash", "updated_at", "demo_only"})
 _ENTRY_KEYS = frozenset({"sequence", "declaration_id", "action", "actor", "at", "payload",
                          "previous_hash", "hash"})
-_STATUSES = frozenset({"draft", "validation_failed", "ready", "submitted", "demo_accepted", "needs_revision"})
+_OPTIONAL_DECLARATION_KEYS = frozenset({"clearance"})
+_STATUSES = frozenset({"draft", "validation_failed", "ready", "submitted", "auto_accepted", "demo_accepted",
+                       "needs_revision"})
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 
 _UNREADABLE_DECLARATION = "Stored declaration is unreadable"
@@ -126,7 +128,8 @@ def _loads(text):
 
 
 def _well_formed_declaration(value):
-    return (isinstance(value, dict) and value.keys() == _DECLARATION_KEYS and
+    return (isinstance(value, dict) and
+            _DECLARATION_KEYS <= value.keys() <= _DECLARATION_KEYS | _OPTIONAL_DECLARATION_KEYS and
             isinstance(value["id"], str) and isinstance(value["shipment_id"], str) and
             _is_int(value["version"]) and value["version"] >= 1 and
             isinstance(value["status"], str) and value["status"] in _STATUSES and
@@ -329,12 +332,86 @@ def _validate(payload, shipment):
     return {"valid": not issues, "issues": issues}
 
 
+RULESET_ID = "demo-rules-v1"
+# Illustrative demo parameters only; not real customs lists.
+MANUAL_CONTROL_HS_PREFIXES = ("93", "2844", "3601", "3602", "3603", "3604")
+TRUSTED_SHIPPERS = ("Demo Russian Exporter", "Demo Kazakh Exporter", "Demo Iranian Exporter")
+ALLOWED_ORIGINS = ("RU", "KZ", "IR", "AZ", "TM", "UZ")
+VALUE_PER_KG_BAND_USD = (0.05, 500.0)
+MASS_TOLERANCE_KG = 1
+
+
+def _consistent(payload, shipment):
+    return _validate(payload, shipment)["valid"]
+
+
+def _hs_not_controlled(payload, shipment):
+    return not payload["hs_code"].strip().startswith(MANUAL_CONTROL_HS_PREFIXES)
+
+
+def _value_per_kg(payload, shipment):
+    mass = payload["mass_kg"]
+    return mass > 0 and VALUE_PER_KG_BAND_USD[0] <= payload["value_usd"] / mass <= VALUE_PER_KG_BAND_USD[1]
+
+
+def _trusted_shipper(payload, shipment):
+    return payload["shipper"].strip() in TRUSTED_SHIPPERS
+
+
+def _origin_allowed(payload, shipment):
+    return payload["origin_country"].strip().upper() in ALLOWED_ORIGINS
+
+
+# (id, description, parameters, check, failure detail). Details are static: never echo input.
+_RULES = (
+    ("R1", "Documents are consistent with the declaration (container ids, masses)",
+     {"mass_tolerance_kg": MASS_TOLERANCE_KG}, _consistent, "Documents are inconsistent"),
+    ("R2", "HS code is not on the manual-control list",
+     {"manual_control_hs_prefixes": list(MANUAL_CONTROL_HS_PREFIXES)}, _hs_not_controlled,
+     "HS code requires manual control"),
+    ("R3", "Declared value per kg is within a plausible band",
+     {"usd_per_kg_min": VALUE_PER_KG_BAND_USD[0], "usd_per_kg_max": VALUE_PER_KG_BAND_USD[1]},
+     _value_per_kg, "Value per kg is outside the plausible band"),
+    ("R4", "Shipper is on the trusted-trader (AEO-like) list",
+     {"trusted_shippers": list(TRUSTED_SHIPPERS)}, _trusted_shipper, "Shipper is not a trusted trader"),
+    ("R5", "Origin country is on the allowed list",
+     {"allowed_origins": list(ALLOWED_ORIGINS)}, _origin_allowed, "Origin country is not on the allowed list"),
+)
+
+
+def ruleset_definition():
+    return {"id": RULESET_ID,
+            "rules": [{"id": rid, "description": desc, "parameters": params}
+                      for rid, desc, params, _, _ in _RULES]}
+
+
+def ruleset_hash():
+    return _hash(ruleset_definition())
+
+
+def ruleset():
+    return {**ruleset_definition(), "ruleset_hash": ruleset_hash()}
+
+
+def evaluate_ruleset(payload, shipment=None):
+    """Pure, deterministic evaluation; ``shipment`` defaults to the declaration's own facts."""
+    if shipment is None:
+        shipment = {"container_id": payload["container_id"], "mass_kg": payload["mass_kg"]}
+    results = []
+    for rid, _, _, check, failure in _RULES:
+        passed = bool(check(payload, shipment))
+        results.append({"rule_id": rid, "passed": passed, "detail": "OK" if passed else failure})
+    return {"ruleset_id": RULESET_ID, "ruleset_hash": ruleset_hash(),
+            "decision": "auto_accepted" if all(r["passed"] for r in results) else "manual_review",
+            "results": results}
+
+
 def validate_declaration(db_path: str, shipment: dict, actor: dict, now: str) -> dict:
     _role(actor, "broker")
     key = _audit_key()
     with _session(db_path, "BEGIN IMMEDIATE") as db:
         declaration = _required(db, shipment["id"])
-        if declaration["status"] in ("submitted", "demo_accepted", "needs_revision"):
+        if declaration["status"] in ("submitted", "auto_accepted", "demo_accepted", "needs_revision"):
             raise ValueError("Save a draft before validating")
         try:
             declaration["validation"] = _validate(declaration["payload"], shipment)
@@ -350,7 +427,7 @@ def validate_declaration(db_path: str, shipment: dict, actor: dict, now: str) ->
 def _parse_replay(replay, shipment_id):
     response = _parse_declaration(replay["response_json"], _UNREADABLE_SUBMISSION)
     try:
-        consistent = (response["shipment_id"] == shipment_id and response["status"] == "submitted" and
+        consistent = (response["shipment_id"] == shipment_id and response["status"] in ("submitted", "auto_accepted") and
                       response["version"] == replay["version"] and
                       _digest_equal(response["content_hash"], replay["content_hash"]) and
                       _digest_equal(_hash(response["payload"]), response["content_hash"]))
@@ -361,7 +438,8 @@ def _parse_replay(replay, shipment_id):
     return response
 
 
-def submit_declaration(db_path: str, shipment_id: str, idempotency_key: str, actor: dict, now: str) -> dict:
+def submit_declaration(db_path: str, shipment_id: str, idempotency_key: str, actor: dict, now: str,
+                       shipment: dict | None = None) -> dict:
     _role(actor, "broker")
     if not isinstance(idempotency_key, str) or not idempotency_key.strip():
         raise ValueError("Idempotency key is required")
@@ -381,7 +459,15 @@ def submit_declaration(db_path: str, shipment_id: str, idempotency_key: str, act
             raise ValueError("Declaration must be ready")
         declaration["status"] = "submitted"
         declaration["updated_at"] = now
-        _store(db, declaration, "submit", actor, now, key)
+        # Deterministic "smart contract" decision, recorded inside the chained submit entry.
+        try:
+            clearance = evaluate_ruleset(declaration["payload"], shipment)
+        except (KeyError, TypeError, AttributeError):
+            raise ValueError(_UNREADABLE_DECLARATION) from None
+        declaration["clearance"] = clearance
+        if clearance["decision"] == "auto_accepted":
+            declaration["status"] = "auto_accepted"
+        _store(db, declaration, "submit", actor, now, key, {"clearance": clearance})
         db.execute("INSERT INTO submission_keys VALUES (?, ?, ?, ?, ?, ?)", (actor["id"], shipment_id, idempotency_key, declaration["version"], declaration["content_hash"], _json(declaration)))
         return declaration
 
@@ -415,7 +501,7 @@ def get_audit(db_path: str, shipment_id: str) -> list[dict]:
     return [_parse_entry(row[0]) for row in rows]
 
 
-def _declaration_matches(declaration, latest, expected_validation, shipment_id):
+def _declaration_matches(declaration, latest, expected_validation, shipment_id, expected_clearance=None):
     try:
         return (declaration["id"] == "declaration-" + shipment_id and
                 declaration["shipment_id"] == shipment_id and declaration["demo_only"] is True and
@@ -423,7 +509,8 @@ def _declaration_matches(declaration, latest, expected_validation, shipment_id):
                 all(_json(latest["payload"].get(name)) == _json(declaration[name])
                     for name in ("content_hash", "version", "status")) and
                 latest["at"] == declaration["updated_at"] and
-                _json(declaration["validation"]) == _json(expected_validation))
+                _json(declaration["validation"]) == _json(expected_validation) and
+                _json(declaration.get("clearance")) == _json(expected_clearance))
     except ValueError:  # unencodable text in a tampered row
         return False
 
@@ -443,6 +530,7 @@ def verify_audit(db_path: str, shipment_id: str) -> dict:
     invalid = None
     latest = None
     expected_validation = None
+    expected_clearance = None
     for expected, row in enumerate(rows, 1):
         checked += 1
         try:
@@ -460,13 +548,17 @@ def verify_audit(db_path: str, shipment_id: str) -> dict:
             break
         if entry["action"] == "save":
             expected_validation = {"valid": False, "issues": []}
+            expected_clearance = None
+        elif entry["action"] == "submit":
+            expected_clearance = entry["payload"].get("clearance")
         elif entry["action"] == "validate":
             expected_validation = entry["payload"].get("validation")
         previous = digest
         latest = entry
     if invalid is None and (declaration is not None or not declaration_readable):
         if (not declaration_readable or latest is None or
-                not _declaration_matches(declaration, latest, expected_validation, shipment_id)):
+                not _declaration_matches(declaration, latest, expected_validation, shipment_id,
+                                         expected_clearance)):
             invalid = len(rows) if rows else 1
     return {"valid": invalid is None, "entries_checked": checked,
             "first_invalid_sequence": invalid,
