@@ -23,12 +23,19 @@ def get_weather(port_id: str, *, use_live: bool = False,
                 cache_path: str | None = None) -> dict: ...  # Weather
 ```
 
-Always include shipments SCT-001/002/003; IDs and generated order stable. Locations:
-`rail_hub` (Russian inland terminal), `makhachkala`, `olya`, `anzali`, `tehran`.
+Always include shipments SCT-001..SCT-006 (004-006 run on the eastern branch); IDs and generated order stable. Locations:
+`rail_hub` (Russian inland terminal), `makhachkala`, `olya`, `anzali`, `tehran`, plus the
+eastern branch `aktau` (KZ), `turkmenbashi` (TM) and `amirabad` (IR).
 Use human-readable names/coordinates in Port. Service IDs must include
 `rail-main` (rail_hub -> makhachkala), `sea-main` (makhachkala -> anzali),
 `transfer-olya` (makhachkala -> olya road), `sea-olya` (olya -> anzali),
-`road-final` (anzali -> tehran). Extra services allowed; no changes to required IDs.
+`road-final` (anzali -> tehran). Extra services allowed; no changes to required IDs. Illustrative eastern-branch services:
+`rail-east` (rail_hub -> aktau), `sea-aktau` (aktau -> amirabad), `rail-kz-tm`
+(aktau -> turkmenbashi), `sea-tkm` (turkmenbashi -> amirabad), `sea-mak-amirabad`
+(makhachkala -> amirabad, the eastern alternative when `closure` blocks `sea-main`) and
+`rail-amirabad` (amirabad -> tehran). SCT-004 (rail-east, sea-aktau, rail-amirabad),
+SCT-005 (sea-mak-amirabad, rail-amirabad) and SCT-006 (rail-east, rail-kz-tm, sea-tkm,
+rail-amirabad) are synthetic and every new port has deterministic synthetic weather.
 Road services use explicit departures too (hourly is fine), not magical instantaneous edges.
 
 SCT-001 is already inbound on rail-main, current_location_id=makhachkala for the

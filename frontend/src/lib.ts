@@ -70,6 +70,9 @@ export const portNames: Record<string, string> = {
   olya: "Порт Оля",
   anzali: "Порт Энзели",
   tehran: "Сухой порт Тегеран",
+  aktau: "Морской порт Актау",
+  turkmenbashi: "Морской порт Туркменбаши",
+  amirabad: "Порт Амирабад",
 };
 // Short names for tight places: map labels, shipment cards, timeline rows.
 export const portShort: Record<string, string> = {
@@ -78,6 +81,9 @@ export const portShort: Record<string, string> = {
   olya: "Оля",
   anzali: "Энзели",
   tehran: "Тегеран",
+  aktau: "Актау",
+  turkmenbashi: "Туркменбаши",
+  amirabad: "Амирабад",
 };
 export const portKinds: Record<string, string> = {
   terminal: "Ж/д терминал",

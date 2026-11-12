@@ -45,7 +45,7 @@ const LANDS: [string, number, number][] = [
   ["Казахстан", 55.4, 45.4],
   ["Туркменистан", 56.4, 39.6],
   ["Азербайджан", 46.2, 40.2],
-  ["Иран", 55.6, 36.5],
+  ["Иран", 55.2, 35.7],
 ];
 const LABEL_SIDE: Record<string, "left" | "right"> = {
   rail_hub: "right",
@@ -53,6 +53,9 @@ const LABEL_SIDE: Record<string, "left" | "right"> = {
   makhachkala: "left",
   anzali: "left",
   tehran: "right",
+  aktau: "right",
+  turkmenbashi: "right",
+  amirabad: "right",
 };
 
 // "Iso" space: degrees with longitude pre-shrunk, so distances are isotropic.
