@@ -74,7 +74,8 @@ def _mode_split(details: list[ShipmentDetail]) -> list[dict]:
 
 
 def _status(d: ShipmentDetail) -> str:
-    if d.current_route.missed_connection or d.prediction.risk == "high":
+    # Same rule as Dashboard.summary.high_risk: an unavailable route is at risk too.
+    if not d.current_route.feasible or d.prediction.risk == "high":
         return "at_risk"
     declaration = d.preclearance
     if declaration is None or declaration.status not in DOCS_OK:

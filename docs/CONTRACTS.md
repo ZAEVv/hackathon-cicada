@@ -120,7 +120,8 @@ def calculate_emissions(legs: list[dict], mass_kg: float) -> dict: ... # Emissio
 
 Profiles: none all zero; storm arrival_delay_hours=3, queue_extra_hours=2, wind_mps=22, wave_height_m=4.5;
 congestion arrival_delay_hours=0, queue_extra_hours=6; closure blocks `sea-main` only.
-Storm is local Makhachkala disruption, NOT a claim all Caspian ports remain safe in storms.
+Storm is a local disruption at the shipment's current port (Makhachkala on the western line, Aktau on
+the eastern branch), NOT a claim all Caspian ports remain safe in storms.
 Other wind and wave_height_m values null. Pure functions; do not mutate inputs. NetworkX directed graph
 enumerates small simple paths, scheduler selects departures >= readiness+handling before cutoff.
 Start at current_location_id at prediction.ready_at (initial handling already counted);

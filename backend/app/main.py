@@ -36,6 +36,7 @@ LOOPBACK_PEERS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
 FORWARDING_HEADERS = ("forwarded", "x-forwarded-for", "x-real-ip")
 MAX_AUTHORIZATION_LENGTH = 512
 AUTH_REQUIRED = "Valid demo bearer token required"
+DEPARTURE_EVENT_MODES = {"sea_departure": "sea", "rail_departure": "rail", "road_departure": "road"}
 
 
 def _truthy(name: str) -> bool:
@@ -217,9 +218,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 continue
             if event["event_type"] == "port_arrival":
                 event["estimated_at"] = arrival.isoformat().replace("+00:00", "Z")
-            elif event["event_type"] == "sea_departure":
+            elif event["event_type"] in DEPARTURE_EVENT_MODES:
+                # sea/rail/road departures alike: a static estimate would contradict
+                # the route (e.g. SCT-006's rail leg after a missed connection).
+                mode = DEPARTURE_EVENT_MODES[event["event_type"]]
                 matching = next((leg for leg in routes["current_route"]["legs"]
-                                 if leg["mode"] == "sea" and leg["origin_id"] == event["location_id"]), None)
+                                 if leg["mode"] == mode and leg["origin_id"] == event["location_id"]), None)
                 event["estimated_at"] = matching["departure_at"] if matching else None
             elif event["event_type"] == "delivery":
                 event["estimated_at"] = routes["current_route"]["eta"]
@@ -247,7 +251,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
         with lock:
             details = [detail(sid) for sid in app.state.shipments]
             return Dashboard(shipments=details, summary={"total": len(details),
-                "high_risk": sum(d.prediction.risk == "high" or d.current_route.missed_connection for d in details),
+                # An infeasible current route (missed connection, or unavailable under
+                # a closure) is at risk even when the readiness forecast is low.
+                "high_risk": sum(d.prediction.risk == "high" or not d.current_route.feasible for d in details),
                 "co2_kg": sum(d.current_route.co2_kg for d in details)})
 
     @app.get("/api/summary", response_model=CorridorSummary, dependencies=authenticated)

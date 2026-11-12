@@ -60,6 +60,7 @@ import {
   statuses,
   storeToken,
   toAmount,
+  translate,
 } from "./lib";
 
 const PAGES = [
@@ -867,7 +868,7 @@ function App() {
                           <strong>Замечания проверки</strong>
                           {d.preclearance.validation.issues.map((issue, i) => (
                             <p key={i}>
-                              {issue.field}: {issue.message} ({issue.code})
+                              {issue.field}: {translate(issue.message)} ({issue.code})
                             </p>
                           ))}
                         </div>
@@ -1077,7 +1078,7 @@ function App() {
                         <strong>{date(metrics.split_at)}</strong>
                       </div>
                       <p className="micro">
-                        {metrics.disclaimer} ROC AUC может быть недоступен,
+                        {translate(metrics.disclaimer)} ROC AUC может быть недоступен,
                         если в тестовой выборке только один класс.
                       </p>
                     </section>
