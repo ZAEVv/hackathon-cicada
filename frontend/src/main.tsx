@@ -2,459 +2,90 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
-  Anchor,
   ArrowDownRight,
-  ArrowRight,
   BarChart3,
+  Bell,
   Check,
-  ChevronRight,
-  CircleHelp,
   ClipboardCheck,
   Clock3,
-  CloudSun,
-  Container,
   FileText,
-  Globe2,
   Layers3,
-  Leaf,
   Map,
-  Menu,
-  RefreshCw,
-  Route as RouteIcon,
+  Moon,
   Settings2,
   ShieldCheck,
-  Ship,
-  SlidersHorizontal,
+  Sun,
   TriangleAlert,
   X,
 } from "lucide-react";
 import "./style.css";
+import { MinimalDashboard } from "./minimal/MinimalDashboard";
+import { Overview } from "./overview/Overview";
+import { useSpotlight } from "./motion";
+import { applyTheme, loadTheme, switchTheme, type Theme } from "./theme";
+import type {
+  Audit,
+  Dashboard,
+  Declaration,
+  Detail,
+  Metrics,
+  Payload,
+  Port,
+  Verification,
+} from "./types";
+import {
+  AMOUNT_MAX,
+  DEFAULT_TOKENS,
+  TOKEN_KEYS,
+  api,
+  date,
+  docs,
+  fmt,
+  initialPayload,
+  loadToken,
+  lookup,
+  newIdempotencyKey,
+  portName,
+  portShortName,
+  post,
+  statuses,
+  storeToken,
+  toAmount,
+} from "./lib";
 
-type Port = {
-  id: string;
-  name: string;
-  country: string;
-  lat: number;
-  lon: number;
-  kind: string;
-};
-type Leg = {
-  service_id: string;
-  origin_id: string;
-  destination_id: string;
-  mode: string;
-  departure_at: string;
-  arrival_at: string;
-  cutoff_at: string;
-  distance_km: number;
-  cost_usd: number;
-  co2_kg: number;
-};
-type Route = {
-  id: string;
-  label: string;
-  feasible: boolean;
-  reason: string | null;
-  missed_connection: boolean;
-  eta: string | null;
-  cost_usd: number;
-  co2_kg: number;
-  legs: Leg[];
-  emissions: {
-    total_kg: number;
-    by_leg_kg: number[];
-    factor_version: string;
-    factors_kg_per_tonne_km: Record<string, number>;
-    disclaimer: string;
-  };
-};
-type Event = {
-  id: string;
-  event_type: string;
-  location_id: string;
-  planned_at: string | null;
-  estimated_at: string | null;
-  actual_at: string | null;
-  source: string;
-  quality_flag: string;
-};
-type Doc = {
-  kind: string;
-  number: string;
-  container_id: string;
-  mass_kg: number;
-};
-type Payload = {
-  shipper: string;
-  consignee: string;
-  description: string;
-  mass_kg: number;
-  value_usd: number;
-  origin_country: string;
-  hs_code: string;
-  container_id: string;
-  documents: Doc[];
-};
-type Declaration = {
-  id: string;
-  version: number;
-  status: string;
-  payload: Payload;
-  validation: {
-    valid: boolean;
-    issues: { field: string; code: string; message: string }[];
-  };
-  content_hash: string;
-  updated_at: string;
-};
-type Detail = {
-  simulation_now: string;
-  synthetic: boolean;
-  shipment: {
-    id: string;
-    reference: string;
-    container_id: string;
-    cargo: string;
-    mass_kg: number;
-    origin_id: string;
-    destination_id: string;
-    current_location_id: string;
-    planned_port_arrival: string;
-    planned_delivery_at: string;
-    documents_ready_at: string;
-    queue_hours: number;
-    events: Event[];
-  };
-  weather: {
-    wind_mps: number;
-    precipitation_mm: number;
-    source: string;
-    observed_at: string;
-    stale: boolean;
-  };
-  scenario: { kind: string; wind_mps?: number | null };
-  prediction: {
-    delay_hours: number;
-    ready_at: string;
-    miss_probability: number;
-    risk: string;
-    factors: string[];
-    model_version: string;
-    data_source: string;
-  };
-  current_route: Route;
-  alternatives: Route[];
-  selected_route_id: string | null;
-  preclearance: Declaration | null;
-};
-type Dashboard = {
-  simulation_now: string;
-  synthetic: boolean;
-  shipments: Detail[];
-  summary: Record<string, number>;
-};
-type Metrics = {
-  model_version: string;
-  train_rows: number;
-  test_rows: number;
-  split_at: string;
-  baseline_mae_hours: number;
-  model_mae_hours: number;
-  roc_auc: number | null;
-  disclaimer: string;
-};
-type Audit = {
-  sequence: number;
-  action: string;
-  actor: string;
-  at: string;
-  hash: string;
-  previous_hash: string;
-  payload: Record<string, unknown>;
-};
-type Verification = {
-  valid: boolean;
-  entries_checked: number;
-  first_invalid_sequence: number | null;
-  disclaimer: string;
-};
+const PAGES = [
+  { id: "overview", label: "Обзор", title: "Обзор перевозок", Icon: Map },
+  {
+    id: "documents",
+    label: "Документы",
+    title: "Предварительная декларация",
+    Icon: FileText,
+  },
+  { id: "model", label: "Модель", title: "Качество модели", Icon: BarChart3 },
+  { id: "minimal", label: "Сводка", title: "Сводный дашборд", Icon: Layers3 },
+] as const;
+type Page = (typeof PAGES)[number]["id"];
 
-const fmt = (n: number | null | undefined, digits = 0) =>
-  n == null || !Number.isFinite(n)
-    ? "—"
-    : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(
-        n,
-      );
-const date = (s: string | null | undefined) => {
-  if (!s) return "—";
-  const t = new Date(s);
-  return Number.isNaN(t.getTime())
-    ? "—"
-    : new Intl.DateTimeFormat("ru-RU", {
-        day: "numeric",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: "UTC",
-      }).format(t) + " UTC";
-};
-// Own-property lookup: server strings such as "constructor" or "__proto__"
-// must not resolve to inherited Object.prototype members.
-const lookup = (
-  table: Record<string, string>,
-  key: unknown,
-): string | undefined =>
-  typeof key === "string" && Object.prototype.hasOwnProperty.call(table, key)
-    ? table[key]
-    : undefined;
-const riskLabels: Record<string, string> = {
-  low: "Низкий",
-  medium: "Средний",
-  high: "Высокий",
-};
-const statuses: Record<string, string> = {
-  draft: "Черновик",
-  validation_failed: "Есть замечания",
-  ready: "Готова к отправке",
-  submitted: "На рассмотрении",
-  demo_accepted: "Принята в демо",
-  needs_revision: "На доработке",
-};
-const scenarios: Record<string, string> = {
-  none: "Базовый",
-  storm: "Шторм",
-  congestion: "Очередь",
-  closure: "Закрытие",
-};
-const modes: Record<string, string> = {
-  sea: "Море",
-  road: "Авто",
-  rail: "Ж/д",
-};
-const docs: Record<string, string> = {
-  invoice: "Инвойс",
-  packing_list: "Упаковочный лист",
-  transport: "Транспортный документ",
-};
-const portNames: Record<string, string> = {
-  rail_hub: "Астраханский ж/д терминал",
-  makhachkala: "Порт Махачкала",
-  olya: "Порт Оля",
-  anzali: "Порт Энзели",
-  tehran: "Сухой порт Тегеран",
-};
-const translations: Record<string, string> = {
-  "High wind": "Сильный ветер",
-  "Moderate wind": "Умеренный ветер",
-  "Low wind": "Слабый ветер",
-  "Long terminal queue": "Большая очередь в терминале",
-  "Short terminal queue": "Небольшая очередь в терминале",
-  "Precipitation present": "Есть осадки",
-  "Known arrival delay included once": "Учтена известная задержка прибытия",
-  "Scenario queue extension included once":
-    "Учтено увеличение очереди по сценарию",
-  "Documents determine readiness": "Готовность зависит от документов",
-  "Documents ready after cutoff": "Документы будут готовы после дедлайна",
-  "Miss probability from synthetic forecast-error spread; not guaranteed calibrated":
-    "Вероятность оценена по разбросу ошибок прогноза на синтетике; калибровка не гарантирована",
-  "Readiness after demo cutoff": "Готовность после демо-дедлайна",
-  "Readiness within demo cutoff": "Готовность до демо-дедлайна",
-  "Planned route": "Плановый маршрут",
-  "Planned Caspian crossing": "Плановый переход через Каспий",
-  "Next-departure recovery": "Восстановление на следующем рейсе",
-  "Alternative route": "Альтернативный маршрут",
-  "Planned route is unavailable under current conditions.":
-    "Плановый маршрут недоступен в текущих условиях.",
-  "Planned connection missed; showing earliest recovery.":
-    "Плановая стыковка пропущена; показан ближайший вариант восстановления.",
-  rail_departure: "Отправление по железной дороге",
-  port_arrival: "Прибытие в порт",
-  sea_departure: "Морское отправление",
-  road_departure: "Отправление автотранспортом",
-  delivery: "Доставка",
-};
-const translate = (value: string) => lookup(translations, value) ?? value;
-const portName = (port: Port) => lookup(portNames, port.id) ?? port.name;
-const riskLabel = (risk: string) => lookup(riskLabels, risk) ?? risk;
-const riskClass = (risk: string) =>
-  lookup(riskLabels, risk) !== undefined ? risk : "";
-function scheduleStatus(route: Route): string | null {
-  if (route.missed_connection) return "Стыковка пропущена";
-  if (!route.feasible) return "Маршрут недоступен";
-  return null;
-}
-const clip = (s: string, max = 300) =>
-  s.length > max ? s.slice(0, max) + "…" : s;
-function validationSummary(detail: unknown): string {
-  if (!Array.isArray(detail)) return "";
-  return detail
-    .slice(0, 3)
-    .map((item: unknown) => {
-      if (!item || typeof item !== "object") return "";
-      const { loc, msg } = item as { loc?: unknown; msg?: unknown };
-      const field = Array.isArray(loc)
-        ? loc
-            .filter(
-              (x: unknown) =>
-                (typeof x === "string" && x !== "body") ||
-                typeof x === "number",
-            )
-            .join(".")
-        : "";
-      const text = typeof msg === "string" ? msg : "некорректное значение";
-      return field ? `${field}: ${text}` : text;
-    })
-    .filter((s) => s !== "")
-    .join("; ");
-}
-function errorMessage(
-  status: number,
-  retryAfter: string | null,
-  body: unknown,
-): string {
-  const detail =
-    body && typeof body === "object" && !Array.isArray(body)
-      ? (body as { detail?: unknown }).detail
-      : undefined;
-  const serverText = typeof detail === "string" ? detail : "";
-  if (status === 401)
-    return "Неверный или отсутствующий токен доступа. Проверьте настройки доступа.";
-  if (status === 403) return "Недостаточно прав для этого действия.";
-  if (status === 413) return "Слишком большой объём данных в запросе.";
-  if (status === 422) {
-    const summary = validationSummary(detail) || serverText;
-    return clip(
-      "Данные не прошли проверку" + (summary ? ": " + summary : "."),
-    );
-  }
-  if (status === 429) {
-    const wait = (retryAfter || "").trim();
-    return /^\d{1,5}$/.test(wait)
-      ? `Слишком много запросов, повторите через ${Number(wait)} с.`
-      : "Слишком много запросов, повторите позже.";
-  }
-  if (status >= 500) return "Ошибка сервера. Повторите попытку позже.";
-  if ((status === 404 || status === 409 || status === 400) && serverText)
-    return clip(serverText);
-  return `Ошибка запроса (${status}).`;
-}
-async function api<T>(
-  path: string,
-  options: RequestInit = {},
-  token?: string,
-): Promise<T> {
-  if (token && !/^[\x21-\x7e]+$/.test(token))
-    throw new Error("Токен содержит недопустимые символы.");
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    ...(options.body ? { "Content-Type": "application/json" } : {}),
-    ...((options.headers as Record<string, string>) || {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-  let response: Response;
-  try {
-    response = await fetch("/api" + path, {
-      ...options,
-      headers,
-      credentials: "omit",
-      cache: "no-store",
-      redirect: "error",
-      referrerPolicy: "no-referrer",
-    });
-  } catch {
-    throw new Error("Сервер недоступен или соединение прервано.");
-  }
-  let text = "";
-  try {
-    text = await response.text();
-  } catch {
-    text = "";
-  }
-  let body: unknown = undefined;
-  let parsed = false;
-  if (text) {
-    try {
-      body = JSON.parse(text);
-      parsed = true;
-    } catch {
-      parsed = false;
-    }
-  }
-  if (!response.ok)
-    throw new Error(
-      errorMessage(
-        response.status,
-        response.headers.get("Retry-After"),
-        parsed ? body : undefined,
-      ),
-    );
-  if (!parsed || body === null || typeof body !== "object")
-    throw new Error("Некорректный ответ сервера.");
-  return body as T;
-}
-function newIdempotencyKey(): string {
-  const c = globalThis.crypto;
-  if (typeof c.randomUUID === "function") return c.randomUUID();
-  const bytes = new Uint8Array(16);
-  c.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-const TOKEN_KEYS = { broker: "sct-broker", reviewer: "sct-reviewer" } as const;
-const DEFAULT_TOKENS = {
-  broker: "demo-broker-token",
-  reviewer: "demo-reviewer-token",
-} as const;
-// Tokens live only in sessionStorage (cleared with the tab); storage access
-// can throw (private mode, blocked storage), so every call is guarded.
-function loadToken(key: string, fallback: string): string {
-  try {
-    const value = sessionStorage.getItem(key);
-    return value === null ? fallback : value.trim();
-  } catch {
-    return fallback;
-  }
-}
-function storeToken(key: string, value: string) {
-  try {
-    sessionStorage.setItem(key, value);
-  } catch {
-    /* storage unavailable: token stays in memory for this page only */
-  }
-}
-try {
-  localStorage.removeItem(TOKEN_KEYS.broker);
-  localStorage.removeItem(TOKEN_KEYS.reviewer);
-} catch {
-  /* storage unavailable */
-}
-const AMOUNT_MAX = { mass_kg: 1_000_000, value_usd: 1_000_000_000_000 } as const;
-// Number inputs: empty/NaN/Infinity/negative become 0 (rejected by the
-// server as "must be > 0"), values above the server cap are clamped.
-const toAmount = (raw: string, max: number) => {
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.min(n, max) : 0;
-};
-const post = (body?: unknown): RequestInit => ({
-  method: "POST",
-  ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-});
-function initialPayload(d: Detail): Payload {
-  return {
-    shipper: "",
-    consignee: "",
-    description: "",
-    mass_kg: d.shipment.mass_kg,
-    value_usd: 0,
-    origin_country: "",
-    hs_code: "",
-    container_id: d.shipment.container_id,
-    documents: Object.keys(docs).map((kind) => ({
-      kind,
-      number: "",
-      container_id: d.shipment.container_id,
-      mass_kg: d.shipment.mass_kg,
-    })),
-  };
+// Brand mark: a route between two nodes.
+function Logo({ size = 30 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M8 23c5 0 5.5-3.6 8-7s3-7 8-7"
+        stroke="currentColor"
+        strokeWidth="3.4"
+        strokeLinecap="round"
+      />
+      <circle cx="8" cy="23" r="3.6" fill="currentColor" />
+      <circle cx="24" cy="9" r="3.6" fill="currentColor" />
+    </svg>
+  );
 }
 
 function App() {
@@ -463,9 +94,7 @@ function App() {
     [selected, setSelected] = useState(""),
     [detail, setDetail] = useState<Detail | null>(null),
     [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [page, setPage] = useState<"overview" | "documents" | "model">(
-      "overview",
-    ),
+  const [page, setPage] = useState<Page>("overview"),
     [broker, setBroker] = useState(() =>
       loadToken(TOKEN_KEYS.broker, DEFAULT_TOKENS.broker),
     ),
@@ -475,7 +104,8 @@ function App() {
     [brokerDraft, setBrokerDraft] = useState(""),
     [reviewerDraft, setReviewerDraft] = useState(""),
     [settings, setSettings] = useState(false),
-    [mobile, setMobile] = useState(false);
+    [theme, setTheme] = useState<Theme>(loadTheme),
+    [riskPing, setRiskPing] = useState(0);
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true),
@@ -486,6 +116,7 @@ function App() {
   const selectedRef = useRef("");
   const refreshVersion = useRef(0);
   const submitKey = useRef<{ scope: string; key: string } | null>(null);
+  useSpotlight();
   // Reads accept either role: broker token, else reviewer token.
   const authToken = broker || reviewer;
   const openSettings = () => {
@@ -501,6 +132,19 @@ function App() {
   const name = (id: string) => {
     const port = ports.find((p) => p.id === id);
     return port ? portName(port) : id;
+  };
+  const short = (id: string) => {
+    const port = ports.find((p) => p.id === id);
+    return port ? portShortName(port) : id;
+  };
+  const toggleTheme = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const next: Theme = theme === "dark" ? "light" : "dark";
+    const rect = e.currentTarget.getBoundingClientRect();
+    switchTheme(
+      next,
+      { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+      () => setTheme(next),
+    );
   };
   const switchShipment = (id: string) => {
     if (busy || id === selectedRef.current) return;
@@ -581,6 +225,14 @@ function App() {
         .then(setMetrics)
         .catch((e) => setError(e.message));
   }, [page, authToken]);
+  useEffect(() => {
+    if (!settings) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeSettings();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [settings]);
   const mutate = async (
     path: string,
     options: RequestInit,
@@ -629,12 +281,7 @@ function App() {
       if (selectedRef.current === target) setError((e as Error).message);
     }
   };
-  const selectPage = (p: "overview" | "documents" | "model") => {
-    setPage(p);
-    setMobile(false);
-  };
   const d = detail?.shipment.id === selected ? detail : null,
-    r = d?.current_route,
     submitted = d?.preclearance?.status === "submitted",
     dirty = !form || !d?.preclearance ||
       JSON.stringify(form) !== JSON.stringify(d.preclearance.payload),
@@ -648,624 +295,217 @@ function App() {
       true,
     );
   };
+  const pageIndex = PAGES.findIndex((p) => p.id === page);
+  const atRisk = dashboard?.summary.high_risk ?? 0;
   return (
     <div className="app">
-      <aside className={"sidebar " + (mobile ? "open" : "")}>
-        <div className="brand">
-          <div className="brand-mark">
-            <Globe2 size={22} />
-          </div>
-          <div>
-            <strong>SMART CASPIAN</strong>
-            <span>TRANSIT INTELLIGENCE</span>
-          </div>
-          <button
-            className="icon mobile-close"
-            onClick={() => setMobile(false)}
-          >
-            <X size={18} />
-          </button>
+      <svg
+        className="goo-defs"
+        width="0"
+        height="0"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <defs>
+          <filter id="goo" colorInterpolationFilters="sRGB">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur" />
+            <feColorMatrix
+              in="blur"
+              mode="matrix"
+              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -8"
+            />
+          </filter>
+        </defs>
+      </svg>
+      <aside className="rail">
+        <div className="rail-logo" title="Smart Caspian Transit">
+          <Logo />
         </div>
-        <div className="workspace">
-          <span className="workspace-icon">
-            <Layers3 size={17} />
+        <nav
+          className="rail-nav"
+          aria-label="Разделы"
+          style={{ "--idx": pageIndex } as React.CSSProperties}
+        >
+          <span className="nav-goo" aria-hidden="true">
+            <i />
+            <i />
           </span>
-          <div>
-            <strong>Север — Юг</strong>
-            <small>Демо-пространство</small>
-          </div>
-          <ChevronRight size={15} />
-        </div>
-        <div className="nav-caption">РАБОЧЕЕ ПРОСТРАНСТВО</div>
-        <nav>
+          {PAGES.map(({ id, label, title, Icon }) => (
+            <button
+              type="button"
+              key={id}
+              className={"rail-btn" + (page === id ? " active" : "")}
+              aria-current={page === id ? "page" : undefined}
+              aria-label={title}
+              title={title}
+              onClick={() => setPage(id)}
+            >
+              <Icon size={20} />
+              <span className="rail-text">{label}</span>
+            </button>
+          ))}
           <button
-            className={page === "overview" ? "active" : ""}
-            onClick={() => selectPage("overview")}
+            type="button"
+            className="rail-btn settings"
+            aria-label="Настройки доступа"
+            title="Настройки доступа"
+            onClick={openSettings}
           >
-            <Map size={18} /> Обзор перевозок{" "}
-            <ChevronRight className="nav-arrow" size={15} />
-          </button>
-          <button
-            className={page === "documents" ? "active" : ""}
-            onClick={() => selectPage("documents")}
-          >
-            <FileText size={18} /> Предварительная декларация
-          </button>
-          <button
-            className={page === "model" ? "active" : ""}
-            onClick={() => selectPage("model")}
-          >
-            <BarChart3 size={18} /> Качество модели
+            <Settings2 size={20} />
+            <span className="rail-text">Доступ</span>
           </button>
         </nav>
-        <div className="sidebar-bottom">
-          <div className="demo-box">
-            <span className="pulse" />
-            <div>
-              <strong>Демонстрационный режим</strong>
-              <small>
-                Синтетические данные.
-                <br />
-                Не для операционных решений.
-              </small>
-            </div>
-          </div>
-          <button className="settings-link" onClick={openSettings}>
-            <Settings2 size={17} /> Настройки доступа
-          </button>
-          <div className="version">
-            SMART CASPIAN TRANSIT <span>v1.0</span>
-          </div>
-        </div>
       </aside>
-      <main>
-        <header className="topbar">
-          <button className="icon mobile-menu" onClick={() => setMobile(true)}>
-            <Menu size={20} />
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-logo">
+            <Logo size={28} />
+          </span>
+          <strong>SMART CASPIAN TRANSIT</strong>
+          <span className="brand-page">{PAGES[pageIndex].title}</span>
+        </div>
+        <div className="top-right">
+          <span
+            className="live"
+            title="Синтетические данные. Не для операционных решений."
+          >
+            <span className="pulse" />
+            <span className="live-text">Демо-данные</span>
+          </span>
+          <span className="clock">
+            <Clock3 size={15} /> {date(dashboard?.simulation_now)}
+          </span>
+          <button
+            type="button"
+            className="theme-toggle"
+            role="switch"
+            aria-checked={theme === "light"}
+            aria-label="Светлая тема"
+            title={theme === "dark" ? "Включить светлую тему" : "Включить тёмную тему"}
+            onClick={toggleTheme}
+          >
+            <span className="tt-goo" aria-hidden="true">
+              <i />
+              <i />
+            </span>
+            <Moon size={17} />
+            <Sun size={17} />
           </button>
-          <div className="breadcrumbs">
-            Рабочее пространство <ChevronRight size={14} />{" "}
-            <strong>
-              {page === "overview"
-                ? "Обзор перевозок"
-                : page === "documents"
-                  ? "Декларация"
-                  : "Качество модели"}
-            </strong>
-          </div>
-          <div className="top-right">
-            <span className="live">
-              <span className="pulse" /> ДЕМО ДАННЫЕ
-            </span>
-            <span className="clock">
-              <Clock3 size={15} /> {date(dashboard?.simulation_now)}
-            </span>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={`Перевозки под риском: ${atRisk}. Показать их первыми`}
+            title="Показать перевозки под риском"
+            onClick={() => {
+              setPage("overview");
+              setRiskPing((n) => n + 1);
+            }}
+          >
+            <Bell size={19} />
+            {atRisk > 0 && <span className="badge">{fmt(atRisk)}</span>}
+          </button>
+          <button
+            type="button"
+            className="avatar"
+            onClick={openSettings}
+            aria-label="Настройки доступа"
+            title="Настройки доступа"
+          >
+            SC
+          </button>
+        </div>
+      </header>
+      <main className={"stage" + (page === "overview" ? " fixed" : "")}>
+        {error && (
+          <div className="error" role="alert">
+            <TriangleAlert size={18} />
+            <span>{error}</span>
             <button
-              className="avatar"
-              onClick={openSettings}
-              title="Настройки доступа"
+              type="button"
+              aria-label="Закрыть сообщение"
+              onClick={() => setError("")}
             >
-              SC
+              <X size={16} />
             </button>
           </div>
-        </header>
-        <div className="content">
-          {error && (
-            <div className="error">
-              <TriangleAlert size={18} />
-              <span>{error}</span>
-              <button onClick={() => setError("")}>
-                <X size={16} />
-              </button>
-            </div>
-          )}
-          {loading ? (
-            <div className="empty">Загрузка данных…</div>
-          ) : !dashboard ? (
-            <div className="empty">
-              <TriangleAlert />
-              <h2>Нет соединения с сервером</h2>
-              <p>Проверьте, что API запущен на localhost:8000.</p>
-              <button
-                className="primary"
-                onClick={() => {
-                  setLoading(true);
-                  refresh()
-                    .catch((e) => setError(e.message))
-                    .finally(() => setLoading(false));
-                }}
-              >
-                Повторить
-              </button>
-            </div>
-          ) : (
-            <>
-              {page === "overview" && (
-                <>
-                  <div className="page-heading">
+        )}
+        {loading ? (
+          <div className="skeleton-stack" aria-busy="true" aria-label="Загрузка данных">
+            <div className="skeleton" style={{ height: 56 }} />
+            <div className="skeleton map-skeleton" />
+            <div className="skeleton" style={{ height: 140 }} />
+          </div>
+        ) : !dashboard ? (
+          <div className="empty">
+            <TriangleAlert />
+            <h2>Нет соединения с сервером</h2>
+            <p>Проверьте, что API запущен на localhost:8000.</p>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                setLoading(true);
+                refresh()
+                  .catch((e) => setError(e.message))
+                  .finally(() => setLoading(false));
+              }}
+            >
+              Повторить
+            </button>
+          </div>
+        ) : (
+          <div className="page" key={page}>
+            {page === "overview" && (
+              <Overview
+                dashboard={dashboard}
+                ports={ports}
+                selected={selected}
+                detail={d}
+                busy={busy}
+                name={name}
+                short={short}
+                riskPing={riskPing}
+                onSelect={switchShipment}
+                onRefresh={() => refresh().catch((e) => setError(e.message))}
+                onScenario={(kind) => mutate("/scenario", post({ kind }))}
+                onScenarioReset={() => mutate("/scenario/reset", post())}
+                onRoute={(routeId) =>
+                  mutate("/route", post({ route_id: routeId }))
+                }
+                onOpenDocuments={() => setPage("documents")}
+              />
+            )}
+            {page === "documents" &&
+              (d && form && displayedForm ? (
+                <div className="content">
+                  <div className="page-heading reveal">
                     <div>
                       <div className="eyebrow">
-                        КОРИДОР СЕВЕР — ЮГ <span>/</span> ОБЗОР
+                        Документы <span>/</span> {d.shipment.id}
                       </div>
-                      <h1>
-                        Контроль перевозок<span className="heading-dot">.</span>
-                      </h1>
-                      <p>
-                        Вся логистика Каспийского коридора в одном пространстве
-                      </p>
-                    </div>
-                    <div className="heading-actions">
-                      <span className="outline-tag">
-                        <span className="pulse" /> Симуляция активна
-                      </span>
-                      <button
-                        className="secondary"
-                        onClick={() =>
-                          refresh().catch((e) => setError(e.message))
-                        }
-                      >
-                        <RefreshCw size={15} /> Обновить
-                      </button>
-                    </div>
-                  </div>
-                  <div className="kpi-grid">
-                    <Kpi
-                      icon={<Container />}
-                      label="ВСЕГО ПЕРЕВОЗОК"
-                      value={fmt(dashboard.summary.total)}
-                      sub="В демонстрационном контуре"
-                    />
-                    <Kpi
-                      icon={<TriangleAlert />}
-                      label="ВЫСОКИЙ РИСК"
-                      value={fmt(dashboard.summary.high_risk)}
-                      sub="Высокий риск модели или пропущенная стыковка"
-                      accent="orange"
-                    />
-                    <Kpi
-                      icon={<Leaf />}
-                      label="ВЫБРОСЫ CO₂e"
-                      value={fmt(dashboard.summary.co2_kg)}
-                      unit="кг"
-                      sub="Оставшаяся часть пути"
-                    />
-                    <Kpi
-                      icon={<Activity />}
-                      label="ИСТОЧНИК ДАННЫХ"
-                      value={dashboard.synthetic ? "Демо" : "API"}
-                      sub="Фиксированное время симуляции"
-                      small
-                    />
-                  </div>
-                  <div className="section-heading">
-                    <div>
-                      <div className="eyebrow">МОНИТОРИНГ</div>
-                      <h2>
-                        Активные перевозки{" "}
-                        <span className="count">
-                          {dashboard.shipments.length}
-                        </span>
-                      </h2>
-                    </div>
-                    <span className="muted small">
-                      Выберите перевозку для деталей
-                    </span>
-                  </div>
-                  <div className="shipment-list">
-                    {dashboard.shipments.map((item) => (
-                      <button
-                        key={item.shipment.id}
-                        className={
-                          "shipment " +
-                          (selected === item.shipment.id ? "selected" : "")
-                        }
-                        disabled={busy}
-                        onClick={() => switchShipment(item.shipment.id)}
-                      >
-                        <span className="ship-icon">
-                          <Container size={20} />
-                        </span>
-                        <span className="shipment-id">
-                          <strong>{item.shipment.id}</strong>
-                          <small>{item.shipment.container_id}</small>
-                        </span>
-                        <span className="shipment-route">
-                          <strong>
-                            {name(item.shipment.origin_id)}{" "}
-                            <ArrowRight size={14} />{" "}
-                            {name(item.shipment.destination_id)}
-                          </strong>
-                          <small>{item.shipment.reference}</small>
-                        </span>
-                        <span className="shipment-eta">
-                          <small>ПРОГНОЗ ПРИБЫТИЯ</small>
-                          <strong>{date(item.current_route.eta)}</strong>
-                        </span>
-                        <span
-                          className={
-                            "risk " +
-                            (scheduleStatus(item.current_route)
-                              ? "high"
-                              : riskClass(item.prediction.risk))
-                          }
-                        >
-                          <span />{" "}
-                          {scheduleStatus(item.current_route) ||
-                            `Риск модели: ${riskLabel(item.prediction.risk)}`}
-                        </span>
-                        <ChevronRight className="shipment-chevron" size={17} />
-                      </button>
-                    ))}
-                  </div>
-                  {d && r && (
-                    <>
-                      <div className="section-heading detail-heading">
-                        <div>
-                          <div className="eyebrow">
-                            ДЕТАЛИ ПЕРЕВОЗКИ <span className="slash">/</span>{" "}
-                            {d.shipment.id}
-                          </div>
-                          <h2>Маршрут и прогноз</h2>
-                        </div>
-                        <div className="detail-tags">
-                          <span className="outline-tag">
-                            {d.shipment.container_id}
-                          </span>
-                          <span className="outline-tag">
-                            {fmt(d.shipment.mass_kg / 1000, 1)} т
-                          </span>
-                        </div>
-                      </div>
-                      <div className="main-grid">
-                        <div className="left-column">
-                          <section className="card map-card">
-                            <div className="card-heading">
-                              <div>
-                                <h3>Обзор маршрута</h3>
-                                <p>
-                                  Оставшийся путь ·{" "}
-                                  {d.selected_route_id
-                                    ? "выбранная альтернатива"
-                                    : "текущий маршрут"}
-                                </p>
-                              </div>
-                              <span className="map-label">
-                                <span className="pulse" /> СХЕМА МАРШРУТА
-                              </span>
-                            </div>
-                            <RouteMap
-                              ports={ports}
-                              route={r}
-                              current={d.shipment.current_location_id}
-                            />
-                            <div className="map-footer">
-                              <div>
-                                <span className="legend-line" /> Маршрут
-                                перевозки
-                              </div>
-                              <div>
-                                <span className="legend-dot" /> Следующий пункт
-                                обработки
-                              </div>
-                              <span>
-                                Схема по координатам · не навигационная карта
-                              </span>
-                            </div>
-                          </section>
-                          <section className="card timeline-card">
-                            <div className="card-heading">
-                              <div>
-                                <h3>Хронология перевозки</h3>
-                                <p>План, прогноз и фактические события · UTC</p>
-                              </div>
-                              <Clock3 size={18} className="muted" />
-                            </div>
-                            <div className="timeline-head">
-                              <span>СОБЫТИЕ</span>
-                              <span>ПЛАН</span>
-                              <span>ПРОГНОЗ</span>
-                              <span>ФАКТ</span>
-                            </div>
-                            {d.shipment.events.length ? (
-                              d.shipment.events.map((e) => (
-                                <div className="timeline-row" key={e.id}>
-                                  <div className="event-name">
-                                    <span className="event-dot" />
-                                    <div>
-                                      <strong>{translate(e.event_type)}</strong>
-                                      <small>
-                                        {name(e.location_id)} · {e.source} /{" "}
-                                        {e.quality_flag}
-                                      </small>
-                                    </div>
-                                  </div>
-                                  <span>{date(e.planned_at)}</span>
-                                  <span>{date(e.estimated_at)}</span>
-                                  <span>{date(e.actual_at)}</span>
-                                </div>
-                              ))
-                            ) : (
-                              <div className="empty-small">
-                                Событий пока нет
-                              </div>
-                            )}
-                          </section>
-                        </div>
-                        <div className="right-column">
-                          <section className="card insight-card">
-                            <div className="card-heading">
-                              <div>
-                                <h3>Прогноз доставки</h3>
-                                <p>На основе текущего сценария</p>
-                              </div>
-                              <span className={"risk " + riskClass(d.prediction.risk)}>
-                                <span /> Риск модели:{" "}
-                                {riskLabel(d.prediction.risk)}
-                              </span>
-                            </div>
-                            <div className="eta-label">РАСЧЁТНОЕ ПРИБЫТИЕ</div>
-                            <div className="eta-value">{date(r.eta)}</div>
-                            <div className="eta-plan">
-                              План: {date(d.shipment.planned_delivery_at)}
-                            </div>
-                            {!r.feasible && (
-                              <div className="warning">
-                                <TriangleAlert size={16} />
-                                <span>
-                                  {r.reason
-                                    ? translate(r.reason)
-                                    : "Исходное соединение недоступно"}
-                                </span>
-                              </div>
-                            )}
-                            <div className="separator" />
-                            <div className="metric-row">
-                              <span>Вероятность пропуска по модели</span>
-                              <strong>
-                                {fmt(d.prediction.miss_probability * 100, 1)}%
-                              </strong>
-                            </div>
-                            <div className="progress">
-                              <i
-                                style={{
-                                  width: `${Math.max(0, Math.min(100, d.prediction.miss_probability * 100 || 0))}%`,
-                                }}
-                              />
-                            </div>
-                            <p className="micro">
-                              Синтетическая оценка модели, не гарантирует
-                              калибровку; фактическая доступность определяется
-                              расписанием.
-                            </p>
-                            <div className="metric-row">
-                              <span>Готовность к отправке</span>
-                              <strong>{date(d.prediction.ready_at)}</strong>
-                            </div>
-                            <div className="metric-row">
-                              <span>
-                                Дедлайн текущего рейса
-                                {!r.feasible && r.eta
-                                  ? " (восстановление)"
-                                  : ""}
-                              </span>
-                              <strong>{date(r.legs[0]?.cutoff_at)}</strong>
-                            </div>
-                            <div className="metric-row">
-                              <span>Доп. прогноз задержки</span>
-                              <strong>
-                                {fmt(d.prediction.delay_hours, 1)} ч
-                              </strong>
-                            </div>
-                            <div className="factors">
-                              {d.prediction.factors.map((x, i) => (
-                                <span key={i}>{translate(x)}</span>
-                              ))}
-                            </div>
-                          </section>
-                          <section className="card scenario-card">
-                            <div className="card-heading">
-                              <div>
-                                <h3>Сценарии</h3>
-                                <p>Оцените влияние изменений</p>
-                              </div>
-                              <SlidersHorizontal size={18} className="muted" />
-                            </div>
-                            <div className="scenario-grid">
-                              {(
-                                [
-                                  "none",
-                                  "storm",
-                                  "congestion",
-                                  "closure",
-                                ] as const
-                              ).map((s, i) => (
-                                <button
-                                  disabled={busy}
-                                  key={s}
-                                  className={
-                                    d.scenario.kind === s ? "active" : ""
-                                  }
-                                  onClick={() =>
-                                    mutate("/scenario", post({ kind: s }))
-                                  }
-                                >
-                                  {
-                                    [
-                                      <Activity />,
-                                      <CloudSun />,
-                                      <Clock3 />,
-                                      <Anchor />,
-                                    ][i]
-                                  }
-                                  <span>{scenarios[s]}</span>
-                                </button>
-                              ))}
-                            </div>
-                            <button
-                              className="text-button"
-                              disabled={busy}
-                              onClick={() => mutate("/scenario/reset", post())}
-                            >
-                              <RefreshCw size={14} /> Сбросить сценарий
-                            </button>
-                            <p className="micro">
-                              Сценарии заменяют друг друга. Шторм моделируется
-                              локально у Махачкалы.
-                            </p>
-                          </section>
-                        </div>
-                      </div>
-                      <div className="lower-grid">
-                        <section className="card">
-                          <div className="card-heading">
-                            <div>
-                              <h3>Альтернативные маршруты</h3>
-                              <p>Доступные варианты оставшегося пути</p>
-                            </div>
-                            <RouteIcon size={19} className="muted" />
-                          </div>
-                          {d.alternatives.length ? (
-                            d.alternatives.map((a) => (
-                              <div className="alternative" key={a.id}>
-                                <div>
-                                  <strong>{translate(a.label)}</strong>
-                                  {!a.feasible && (
-                                    <small className="unavailable">
-                                      {a.reason
-                                        ? translate(a.reason)
-                                        : "Маршрут недоступен для выбора"}
-                                    </small>
-                                  )}
-                                  <small>
-                                    {a.legs
-                                      .map((l) => name(l.origin_id))
-                                      .concat(
-                                        a.legs.length
-                                          ? [
-                                              name(
-                                                a.legs[a.legs.length - 1]
-                                                  .destination_id,
-                                              ),
-                                            ]
-                                          : [],
-                                      )
-                                      .join(" → ")}
-                                  </small>
-                                  <div className="alt-stats">
-                                    {date(a.eta)} <span>·</span> $
-                                    {fmt(a.cost_usd)} <span>·</span>{" "}
-                                    {fmt(a.co2_kg)} кг CO₂e
-                                  </div>
-                                </div>
-                                <button
-                                  disabled={
-                                    busy ||
-                                    !a.feasible ||
-                                    d.selected_route_id === a.id
-                                  }
-                                  className="secondary"
-                                  onClick={() =>
-                                    mutate("/route", post({ route_id: a.id }))
-                                  }
-                                >
-                                  {!a.feasible
-                                    ? "Недоступен"
-                                    : d.selected_route_id === a.id
-                                      ? "Выбран"
-                                      : "Выбрать"}
-                                </button>
-                              </div>
-                            ))
-                          ) : (
-                            <div className="empty-small">
-                              Доступных альтернатив нет
-                            </div>
-                          )}
-                          <p className="micro">
-                            Выбор моделируется локально и не является
-                            бронированием.
-                          </p>
-                        </section>
-                        <section className="card">
-                          <div className="card-heading">
-                            <div>
-                              <h3>Стоимость и экология</h3>
-                              <p>Только оставшаяся часть маршрута</p>
-                            </div>
-                            <Leaf size={19} className="teal" />
-                          </div>
-                          <div className="impact-total">
-                            <div>
-                              <small>СТОИМОСТЬ</small>
-                              <strong>
-                                {r.legs.length ? "$" + fmt(r.cost_usd) : "—"}
-                              </strong>
-                            </div>
-                            <div>
-                              <small>ВЫБРОСЫ CO₂e</small>
-                              <strong>
-                                {r.legs.length ? fmt(r.co2_kg) + " кг" : "—"}
-                              </strong>
-                            </div>
-                          </div>
-                          {r.legs.map((l, i) => (
-                            <div className="leg-row" key={i}>
-                              <span>
-                                {lookup(modes, l.mode) ?? l.mode} · {name(l.origin_id)}{" "}
-                                → {name(l.destination_id)}
-                              </span>
-                              <strong>{fmt(l.co2_kg)} кг</strong>
-                            </div>
-                          ))}
-                          <p className="micro">
-                            Иллюстрационная оценка только транспорта, без
-                            терминалов, хранения и порожних рейсов; не
-                            сертифицирована ISO/GLEC. Коэффициенты:{" "}
-                            {r.emissions.factor_version}.
-                          </p>
-                        </section>
-                      </div>
-                      <div className="source-note">
-                        <CircleHelp size={15} /> Погода: {d.weather.source}
-                        {d.weather.stale ? " (устарела)" : ""}, базовый ветер{" "}
-                        {fmt(d.weather.wind_mps, 1)} м/с
-                        {d.scenario.wind_mps != null &&
-                          ` · ветер сценария: ${fmt(d.scenario.wind_mps, 1)} м/с`}{" "}
-                        · прогноз: {d.prediction.data_source},{" "}
-                        {d.prediction.model_version}. Расписание и показатели
-                        демонстрационные.
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-              {page === "documents" && d && form && displayedForm && (
-                <>
-                  <div className="page-heading">
-                    <div>
-                      <div className="eyebrow">
-                        ДОКУМЕНТЫ <span>/</span> {d.shipment.id}
-                      </div>
-                      <h1>
-                        Предварительная декларация
-                        <span className="heading-dot">.</span>
-                      </h1>
+                      <h1>Предварительная декларация</h1>
                       <p>
                         Подготовка, проверка и демонстрационное рассмотрение
                         документов
                       </p>
                     </div>
-                    <select
-                      value={selected}
-                      disabled={busy}
-                      onChange={(e) => switchShipment(e.target.value)}
-                    >
-                      {dashboard.shipments.map((s) => (
-                        <option key={s.shipment.id}>{s.shipment.id}</option>
-                      ))}
-                    </select>
+                    <label>
+                      <span className="sr-only">Перевозка</span>
+                      <select
+                        value={selected}
+                        disabled={busy}
+                        onChange={(e) => switchShipment(e.target.value)}
+                      >
+                        {dashboard.shipments.map((s) => (
+                          <option key={s.shipment.id}>{s.shipment.id}</option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
-                  <div className="notice">
+                  <div
+                    className="notice reveal"
+                    style={{ "--i": 1 } as React.CSSProperties}
+                  >
                     <ShieldCheck size={20} />
                     <div>
                       <strong>
@@ -1279,7 +519,10 @@ function App() {
                     </div>
                   </div>
                   <div className="document-grid">
-                    <section className="card form-card">
+                    <section
+                      className="card form-card reveal"
+                      style={{ "--i": 2 } as React.CSSProperties}
+                    >
                       <div className="card-heading">
                         <div>
                           <h3>Данные декларации</h3>
@@ -1289,7 +532,7 @@ function App() {
                               : "Новая декларация"}
                           </p>
                         </div>
-                        <span className="outline-tag">
+                        <span className="outline-tag mono">
                           {d.shipment.container_id}
                         </span>
                       </div>
@@ -1388,6 +631,7 @@ function App() {
                       ))}
                       <div className="form-actions">
                         <button
+                          type="button"
                           disabled={busy || d.preclearance?.status === "submitted"}
                           className="primary"
                           onClick={() =>
@@ -1402,6 +646,7 @@ function App() {
                           Сохранить черновик
                         </button>
                         <button
+                          type="button"
                           disabled={busy || !d.preclearance || d.preclearance.status === "submitted" || d.preclearance.status === "needs_revision" ||
                             JSON.stringify(form) !== JSON.stringify(d.preclearance.payload)}
                           className="secondary"
@@ -1417,6 +662,7 @@ function App() {
                           Проверить
                         </button>
                         <button
+                          type="button"
                           disabled={busy || d.preclearance?.status !== "ready" ||
                             JSON.stringify(form) !== JSON.stringify(d.preclearance.payload)}
                           className="secondary"
@@ -1467,13 +713,16 @@ function App() {
                       )}
                     </section>
                     <div>
-                      <section className="card review-card">
+                      <section
+                        className="card review-card reveal"
+                        style={{ "--i": 3 } as React.CSSProperties}
+                      >
                         <div className="card-heading">
                           <div>
                             <h3>Рассмотрение</h3>
                             <p>Действие демонстрационного проверяющего</p>
                           </div>
-                          <ClipboardCheck size={19} className="teal" />
+                          <ClipboardCheck size={19} className="muted" />
                         </div>
                         <label>
                           Комментарий
@@ -1486,7 +735,8 @@ function App() {
                         </label>
                         <div className="form-actions">
                           <button
-                            className="primary"
+                            type="button"
+                            className="secondary"
                             disabled={
                               busy || !submitted || dirty
                             }
@@ -1495,6 +745,7 @@ function App() {
                             Принять в демо
                           </button>
                           <button
+                            type="button"
                             className="secondary"
                             disabled={
                               busy || !submitted || dirty
@@ -1505,13 +756,20 @@ function App() {
                           </button>
                         </div>
                       </section>
-                      <section className="card audit-card">
+                      <section
+                        className="card audit-card reveal"
+                        style={{ "--i": 4 } as React.CSSProperties}
+                      >
                         <div className="card-heading">
                           <div>
                             <h3>Журнал действий</h3>
                             <p>История изменений декларации</p>
                           </div>
-                          <button className="text-button" onClick={verify}>
+                          <button
+                            type="button"
+                            className="text-button"
+                            onClick={verify}
+                          >
                             Проверить цепочку
                           </button>
                         </div>
@@ -1525,16 +783,18 @@ function App() {
                               <Check size={16} />
                             ) : (
                               <TriangleAlert size={16} />
-                            )}{" "}
-                            {verification.valid
-                              ? verification.entries_checked === 0
-                                ? "Нет записей для проверки"
-                                : "Целостность подтверждена"
-                              : "Нарушена целостность"}{" "}
-                            · записей: {verification.entries_checked}
-                            {verification.first_invalid_sequence != null
-                              ? ` · ошибка №${verification.first_invalid_sequence}`
-                              : ""}
+                            )}
+                            <span>
+                              {verification.valid
+                                ? verification.entries_checked === 0
+                                  ? "Нет записей для проверки"
+                                  : "Целостность подтверждена"
+                                : "Нарушена целостность"}{" "}
+                              · записей: {verification.entries_checked}
+                              {verification.first_invalid_sequence != null
+                                ? ` · ошибка №${verification.first_invalid_sequence}`
+                                : ""}
+                            </span>
                           </div>
                         )}
                         <p className="micro">
@@ -1544,7 +804,7 @@ function App() {
                         {audit.length ? (
                           audit.map((a) => (
                             <div className="audit-entry" key={a.sequence}>
-                              <span className="event-dot" />
+                              <span className="event-dot done" />
                               <div>
                                 <strong>
                                   #{a.sequence} · {a.action}
@@ -1562,101 +822,132 @@ function App() {
                       </section>
                     </div>
                   </div>
-                </>
-              )}
-              {page === "model" && (
-                <>
-                  <div className="page-heading">
-                    <div>
-                      <div className="eyebrow">
-                        АНАЛИТИКА <span>/</span> МОДЕЛЬ
-                      </div>
-                      <h1>
-                        Качество прогноза<span className="heading-dot">.</span>
-                      </h1>
-                      <p>Оценка на отложенной части синтетической истории</p>
+                </div>
+              ) : (
+                <div className="content skeleton-stack" aria-busy="true">
+                  <div className="skeleton" style={{ height: 72 }} />
+                  <div className="skeleton" style={{ height: 420 }} />
+                </div>
+              ))}
+            {page === "minimal" && (
+              <div className="content">
+                <MinimalDashboard />
+              </div>
+            )}
+            {page === "model" && (
+              <div className="content">
+                <div className="page-heading reveal">
+                  <div>
+                    <div className="eyebrow">
+                      Аналитика <span>/</span> Модель
                     </div>
+                    <h1>Качество прогноза</h1>
+                    <p>Оценка на отложенной части синтетической истории</p>
                   </div>
-                  {metrics ? (
-                    <>
-                      <div className="notice">
-                        <Activity size={20} />
-                        <div>
-                          <strong>Демонстрационная модель</strong>
-                          <p>
-                            Хронологическое разделение данных без перемешивания.
-                            Результаты не проверены на реальных перевозках
-                            Каспийского региона.
-                          </p>
-                        </div>
-                      </div>
-                      <div className="kpi-grid">
-                        <Kpi
-                          icon={<BarChart3 />}
-                          label="MAE МОДЕЛИ"
-                          value={fmt(metrics.model_mae_hours, 2)}
-                          unit="ч"
-                          sub="Ошибка прогноза задержки"
-                        />
-                        <Kpi
-                          icon={<ArrowDownRight />}
-                          label="MAE БАЗОВОЙ ОЦЕНКИ"
-                          value={fmt(metrics.baseline_mae_hours, 2)}
-                          unit="ч"
-                          sub="Медиана обучающей выборки"
-                        />
-                        <Kpi
-                          icon={<Activity />}
-                          label="ROC AUC"
-                          value={fmt(metrics.roc_auc, 3)}
-                          sub="Классификация пропуска"
-                        />
-                        <Kpi
-                          icon={<Layers3 />}
-                          label="ВЕРСИЯ МОДЕЛИ"
-                          value={metrics.model_version}
-                          sub="Синтетическая история"
-                          small
-                        />
-                      </div>
-                      <section className="card model-card">
-                        <h3>Выборки и методология</h3>
-                        <div className="metric-row">
-                          <span>Обучающая выборка</span>
-                          <strong>{fmt(metrics.train_rows)} записей</strong>
-                        </div>
-                        <div className="metric-row">
-                          <span>Тестовая выборка</span>
-                          <strong>{fmt(metrics.test_rows)} записей</strong>
-                        </div>
-                        <div className="metric-row">
-                          <span>Граница разделения</span>
-                          <strong>{date(metrics.split_at)}</strong>
-                        </div>
-                        <p className="micro">
-                          {metrics.disclaimer} ROC AUC может быть недоступен,
-                          если в тестовой выборке только один класс.
+                </div>
+                {metrics ? (
+                  <>
+                    <div
+                      className="notice reveal"
+                      style={{ "--i": 1 } as React.CSSProperties}
+                    >
+                      <Activity size={20} />
+                      <div>
+                        <strong>Демонстрационная модель</strong>
+                        <p>
+                          Хронологическое разделение данных без перемешивания.
+                          Результаты не проверены на реальных перевозках
+                          Каспийского региона.
                         </p>
-                      </section>
-                    </>
-                  ) : (
-                    <div className="empty">Загрузка метрик…</div>
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </div>
+                      </div>
+                    </div>
+                    <div className="kpi-grid">
+                      <Kpi
+                        index={2}
+                        icon={<BarChart3 />}
+                        label="MAE модели"
+                        value={fmt(metrics.model_mae_hours, 2)}
+                        unit="ч"
+                        sub="Ошибка прогноза задержки"
+                      />
+                      <Kpi
+                        index={3}
+                        icon={<ArrowDownRight />}
+                        label="MAE базовой оценки"
+                        value={fmt(metrics.baseline_mae_hours, 2)}
+                        unit="ч"
+                        sub="Медиана обучающей выборки"
+                      />
+                      <Kpi
+                        index={4}
+                        icon={<Activity />}
+                        label="ROC AUC"
+                        value={fmt(metrics.roc_auc, 3)}
+                        sub="Классификация пропуска"
+                      />
+                      <Kpi
+                        index={5}
+                        icon={<Layers3 />}
+                        label="Версия модели"
+                        value={metrics.model_version}
+                        sub="Синтетическая история"
+                        small
+                      />
+                    </div>
+                    <section
+                      className="card glow model-card reveal"
+                      style={{ "--i": 6 } as React.CSSProperties}
+                    >
+                      <h3>Выборки и методология</h3>
+                      <div className="metric-row">
+                        <span>Обучающая выборка</span>
+                        <strong>{fmt(metrics.train_rows)} записей</strong>
+                      </div>
+                      <div className="metric-row">
+                        <span>Тестовая выборка</span>
+                        <strong>{fmt(metrics.test_rows)} записей</strong>
+                      </div>
+                      <div className="metric-row">
+                        <span>Граница разделения</span>
+                        <strong>{date(metrics.split_at)}</strong>
+                      </div>
+                      <p className="micro">
+                        {metrics.disclaimer} ROC AUC может быть недоступен,
+                        если в тестовой выборке только один класс.
+                      </p>
+                    </section>
+                  </>
+                ) : (
+                  <div className="skeleton-stack" aria-busy="true">
+                    <div className="skeleton" style={{ height: 72 }} />
+                    <div className="skeleton" style={{ height: 130 }} />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </main>
       {settings && (
         <div className="modal-backdrop" onClick={closeSettings}>
-          <div className="modal card" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Настройки доступа"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="card-heading">
               <div>
                 <h3>Настройки доступа</h3>
                 <p>Токены демонстрационных ролей</p>
               </div>
-              <button className="icon" onClick={closeSettings}>
+              <button
+                type="button"
+                className="icon"
+                aria-label="Закрыть"
+                onClick={closeSettings}
+              >
                 <X size={19} />
               </button>
             </div>
@@ -1693,6 +984,7 @@ function App() {
               удаляются при её закрытии. Пустое поле — токен не отправляется.
             </p>
             <button
+              type="button"
               className="primary"
               onClick={() => {
                 const nextBroker = brokerDraft.trim();
@@ -1720,6 +1012,7 @@ function Kpi({
   sub,
   accent,
   small,
+  index = 0,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -1728,9 +1021,13 @@ function Kpi({
   sub: string;
   accent?: string;
   small?: boolean;
+  index?: number;
 }) {
   return (
-    <div className="kpi card">
+    <div
+      className="kpi card glow reveal"
+      style={{ "--i": index } as React.CSSProperties}
+    >
       <div className="kpi-top">
         <span>{label}</span>
         <div className={"kpi-icon " + (accent || "")}>{icon}</div>
@@ -1742,130 +1039,6 @@ function Kpi({
     </div>
   );
 }
-function RouteMap({
-  ports,
-  route,
-  current,
-}: {
-  ports: Port[];
-  route: Route;
-  current: string;
-}) {
-  const valid = ports.filter(
-    (p) => Number.isFinite(p.lon) && Number.isFinite(p.lat),
-  );
-  if (!valid.length)
-    return <div className="map-empty">Координаты недоступны</div>;
-  const minX = Math.min(...valid.map((p) => p.lon)) - 2,
-    maxX = Math.max(...valid.map((p) => p.lon)) + 2,
-    minY = Math.min(...valid.map((p) => p.lat)) - 2,
-    maxY = Math.max(...valid.map((p) => p.lat)) + 2;
-  const xy = (p: Port) => ({
-    x: 55 + ((p.lon - minX) / (maxX - minX)) * 590,
-    y: 35 + ((maxY - p.lat) / (maxY - minY)) * 250,
-  });
-  return (
-    <div className="map-wrap">
-      <svg
-        viewBox="0 0 700 320"
-        role="img"
-        aria-label="Схема маршрута по координатам пунктов"
-      >
-        <defs>
-          <pattern
-            id="grid"
-            width="35"
-            height="35"
-            patternUnits="userSpaceOnUse"
-          >
-            <path
-              d="M 35 0 L 0 0 0 35"
-              fill="none"
-              stroke="#24404b"
-              strokeWidth=".6"
-            />
-          </pattern>
-          <linearGradient id="sea" x2="1" y2="1">
-            <stop stopColor="#153e49" />
-            <stop offset="1" stopColor="#0e303c" />
-          </linearGradient>
-        </defs>
-        <rect width="700" height="320" fill="#102833" />
-        <rect width="700" height="320" fill="url(#grid)" />
-        <path
-          d="M410 -10 C455 24 430 53 450 83 C469 113 454 141 443 166 C432 193 439 213 410 235 C387 252 380 280 354 330 L585 330 C562 284 573 256 559 225 C544 190 558 164 540 131 C525 104 535 72 513 45 C497 23 503 7 500 -10Z"
-          fill="url(#sea)"
-          opacity=".8"
-        />
-        <text
-          x="469"
-          y="165"
-          fill="#54808a"
-          fontSize="10"
-          letterSpacing="3"
-          transform="rotate(90 469 165)"
-        >
-          КАСПИЙСКОЕ МОРЕ
-        </text>
-        {route.legs.map((l, i) => {
-          const a = valid.find((p) => p.id === l.origin_id),
-            b = valid.find((p) => p.id === l.destination_id);
-          if (!a || !b) return null;
-          const p = xy(a),
-            q = xy(b);
-          return (
-            <line
-              key={i}
-              x1={p.x}
-              y1={p.y}
-              x2={q.x}
-              y2={q.y}
-              stroke="#45d7c1"
-              strokeWidth="2.5"
-              strokeDasharray={l.mode === "sea" ? "6 5" : undefined}
-            />
-          );
-        })}
-        {valid.map((p) => {
-          const pos = xy(p);
-          return (
-            <g key={p.id}>
-              <circle
-                cx={pos.x}
-                cy={pos.y}
-                r={p.id === current ? 10 : 7}
-                fill="#39d3bd"
-                opacity=".16"
-              />
-              <circle
-                cx={pos.x}
-                cy={pos.y}
-                r="4"
-                fill={p.id === current ? "#58ead1" : "#d7f5ed"}
-                stroke="#37cbb5"
-                strokeWidth="2"
-              />
-              <text
-                x={pos.x + 10}
-                y={pos.y - 9}
-                fill="#d7e9e7"
-                fontSize="11"
-                fontWeight="600"
-              >
-                {portName(p)}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-      <div className="map-badge">
-        <Ship size={16} />{" "}
-        {route.legs.length
-          ? `${route.legs.length} плеча маршрута`
-          : "Маршрут недоступен"}
-      </div>
-    </div>
-  );
-}
 
+applyTheme(loadTheme());
 createRoot(document.getElementById("root")!).render(<App />);

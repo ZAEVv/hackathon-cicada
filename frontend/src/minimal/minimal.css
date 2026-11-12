@@ -1,0 +1,310 @@
+/* minimaldb: scoped to .md so it does not leak into the rest of the app. */
+/* Palette follows the app theme (data-theme on <html>): neutral greys, one accent. */
+.md {
+  --bg: transparent;
+  --surface: #ffffff;
+  --border: #e2e2e6;
+  --text: #121214;
+  --text-muted: #666670;
+  --accent: #3350cc;
+  --positive: #0c7f4e;
+  --negative: #c9272d;
+  --warn: #9a5b00;
+  --c1: #3350cc;
+  --c2: #067f93;
+  --c3: #a3a3ad;
+  --track: #ececef;
+  color: var(--text);
+  background: var(--bg);
+  font-size: 14px;
+  line-height: 1.5;
+}
+:root[data-theme="dark"] .md {
+  --surface: #151517;
+  --border: #222226;
+  --text: #f3f3f4;
+  --text-muted: #8e8e97;
+  --accent: #8aa2ff;
+  --positive: #45d39a;
+  --negative: #ff6b6f;
+  --warn: #f2b85c;
+  --c1: #8aa2ff;
+  --c2: #46d3e6;
+  --c3: #5b5b64;
+  --track: #2a2a2f;
+}
+.md h1,
+.md h2,
+.md p {
+  margin: 0;
+}
+.md h1 {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+.md h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.md-muted {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.md-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.md-head p {
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+.md-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  background: var(--surface);
+}
+.md-seg button {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.md-seg button.on {
+  background: var(--text);
+  color: var(--surface);
+  font-weight: 600;
+}
+.md-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  min-width: 0;
+}
+.md-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.md-kpi {
+  display: grid;
+  gap: 6px;
+}
+.md-kpi strong {
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+.md-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.md-delta.up {
+  color: var(--positive);
+}
+.md-delta.down {
+  color: var(--negative);
+}
+.md-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.md-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.md-chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.md-grid-line {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.md-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.md-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.md-donut h2 {
+  margin-bottom: 2px;
+}
+.md-donut-wrap {
+  display: grid;
+  place-items: center;
+  margin: 12px 0;
+}
+.md-donut-wrap svg {
+  width: 160px;
+  height: 160px;
+}
+.md-track {
+  fill: none;
+  stroke: var(--track);
+  stroke-width: 16;
+}
+.md-seg-arc {
+  fill: none;
+  stroke-width: 16;
+}
+.md-seg-arc.c1 {
+  stroke: var(--c1);
+}
+.md-seg-arc.c2 {
+  stroke: var(--c2);
+}
+.md-seg-arc.c3 {
+  stroke: var(--c3);
+}
+.md-donut-total {
+  fill: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+}
+.md-legend {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+.md-legend li {
+  display: grid;
+  grid-template-columns: 10px 16px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.md-legend strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.md-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.md-dot.c1 {
+  background: var(--c1);
+}
+.md-dot.c2 {
+  background: var(--c2);
+}
+.md-dot.c3 {
+  background: var(--c3);
+}
+.md-table-wrap {
+  overflow-x: auto;
+}
+.md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.md-table th,
+.md-table td {
+  text-align: left;
+  padding: 11px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.md-table th {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.md-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.md-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.md-table .mono {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+}
+.md-badge {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.md-badge.ok {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.md-badge.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.md-badge.done {
+  color: var(--text-muted);
+}
+.md-foot {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.md-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.md button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (max-width: 960px) {
+  .md-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .md-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 480px) {
+  .md-kpi strong {
+    font-size: 22px;
+  }
+}
