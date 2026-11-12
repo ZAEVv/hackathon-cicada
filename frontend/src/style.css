@@ -3193,6 +3193,8 @@ button.hub-ship:focus-visible {
   .hub-heat-row {
     grid-template-columns: 72px minmax(0, 1fr) 40px;
     gap: 6px;
+  }
+}
 
 /* ---- UX polish: toast, busy spinner, focus ---- */
 .toast-area {
