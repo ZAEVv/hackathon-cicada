@@ -250,3 +250,35 @@ export type CorridorSummary = {
   methodology: string;
   disclaimer: string;
 };
+
+// Simulated witness ledger (GET /api/shipments/{id}/ledger); nodes run in-process.
+export type LedgerNodeState =
+  | "in_sync"
+  | "behind"
+  | "diverged"
+  | "invalid_signature"
+  | "unavailable";
+export type LedgerNode = {
+  node_id: string;
+  label: string;
+  available: boolean;
+  last_sequence: number | null;
+  head_hash: string | null;
+  signature_valid: boolean | null;
+  in_sync: boolean;
+  state: LedgerNodeState;
+};
+export type LedgerStatus = {
+  shipment_id: string;
+  status: "anchored" | "not_anchored" | "conflict" | "no_quorum" | "disabled";
+  reason: string | null;
+  anchored: boolean;
+  quorum: number;
+  nodes_total: number;
+  nodes_available: number;
+  nodes_in_sync: number;
+  attested_sequence: number;
+  local_sequence: number;
+  nodes: LedgerNode[];
+  disclaimer: string;
+};

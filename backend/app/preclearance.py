@@ -29,15 +29,36 @@ The ``disclaimer`` returned by ``verify_audit`` is deliberately unchanged in
 both modes (frozen wire contract).  Even keyed, verification only proves that
 entries were written by a holder of the key.
 
-Inherent limitations (need an external anchor, e.g. a periodically exported
-head hash, which this demo does not have):
+Witness anchoring (simulated distributed ledger, see ``ledger.py``)
+-------------------------------------------------------------------
+After each state-change transaction commits, the new entry is offered to three
+witness nodes, each with its own SQLite file and key, which co-sign it only as
+an append-only continuation of their own records (quorum 2 of 3).  A witness
+failure never fails the state change; the entry is then reported as "not
+anchored".  ``verify_audit`` additionally compares the local chain with what a
+quorum of witnesses attested and reports the result under ``ledger``.
 
-* Truncating the tail of a chain *and* rolling the declaration row back to the
-  matching earlier state (a genuine earlier snapshot) is undetectable.
-* Deleting both the declaration row and its whole chain looks like a shipment
-  that never had a declaration.
-* Restoring an entire older copy of the database is undetectable.
-* In unkeyed mode none of the checks resist a writer who recomputes hashes.
+Now detected (when a quorum of witnesses holds records for the shipment):
+
+* A history rewritten with recomputed hashes, in unkeyed mode or by a holder
+  of ``AUDIT_HMAC_KEY`` (``ledger.reason == "hash_mismatch"``).
+* Truncating the tail and rolling the declaration back to a genuine earlier
+  snapshot (``"truncated"``), and restoring an older copy of the main
+  database alone.
+* Deleting the declaration together with its whole chain (``"chain_deleted"``).
+
+Still NOT detected / limitations of this prototype:
+
+* All nodes run in the same process on the same host and disk: anyone who can
+  rewrite the main database can usually rewrite or delete the witness files
+  too, and the default witness keys are public demo values.  Real
+  independence needs nodes operated by different parties.
+* Entries appended while fewer than two witnesses accept them are only
+  locally protected (``ledger.status == "not_anchored"``); with fewer than
+  two readable witnesses the ledger cannot judge (``"no_quorum"``).
+* Witnesses attest hashes, not content: in unkeyed mode the local checks plus
+  the attested hash are what binds content.
+* In-memory / URI databases have no witnesses (``"disabled"``).
 
 Messages of exceptions raised here reach API clients (``KeyError`` -> 404,
 ``ValueError`` -> 409, ``PermissionError`` -> 403), so they are static strings
@@ -52,6 +73,8 @@ import os
 import re
 import sqlite3
 from collections import Counter
+
+from . import ledger
 
 AUDIT_KEY_ENV = "AUDIT_HMAC_KEY"
 MIN_AUDIT_KEY_LENGTH = 16
@@ -267,6 +290,13 @@ def _store(db, declaration, action, actor, now, key, extra=None):
     entry["hash"] = _entry_digest(entry, key)
     db.execute("INSERT INTO declarations VALUES (?, ?) ON CONFLICT(shipment_id) DO UPDATE SET declaration_json = excluded.declaration_json", (shipment_id, _json(declaration)))
     db.execute("INSERT INTO audit_entries VALUES (?, ?, ?)", (shipment_id, entry["sequence"], _json(entry)))
+    return entry
+
+
+def _anchor(db_path, shipment_id, entry):
+    """Offer a committed entry to the witnesses; never fails the local state change."""
+    if entry is not None:
+        ledger.anchor(db_path, shipment_id, entry)
 
 
 def get_declaration(db_path: str, shipment_id: str) -> dict | None:
@@ -294,8 +324,9 @@ def save_declaration(db_path: str, shipment: dict, payload: dict, actor: dict, n
                        "status": "draft", "payload": payload,
                        "validation": {"valid": False, "issues": []}, "content_hash": _hash(payload),
                        "updated_at": now, "demo_only": True}
-        _store(db, declaration, "save", actor, now, key)
-        return declaration
+        entry = _store(db, declaration, "save", actor, now, key)
+    _anchor(db_path, declaration["shipment_id"], entry)
+    return declaration
 
 
 def _validate(payload, shipment):
@@ -420,8 +451,9 @@ def validate_declaration(db_path: str, shipment: dict, actor: dict, now: str) ->
             raise ValueError(_UNREADABLE_DECLARATION) from None
         declaration["status"] = "ready" if declaration["validation"]["valid"] else "validation_failed"
         declaration["updated_at"] = now
-        _store(db, declaration, "validate", actor, now, key, {"validation": declaration["validation"]})
-        return declaration
+        entry = _store(db, declaration, "validate", actor, now, key, {"validation": declaration["validation"]})
+    _anchor(db_path, declaration["shipment_id"], entry)
+    return declaration
 
 
 def _parse_replay(replay, shipment_id):
@@ -467,9 +499,10 @@ def submit_declaration(db_path: str, shipment_id: str, idempotency_key: str, act
         declaration["clearance"] = clearance
         if clearance["decision"] == "auto_accepted":
             declaration["status"] = "auto_accepted"
-        _store(db, declaration, "submit", actor, now, key, {"clearance": clearance})
+        entry = _store(db, declaration, "submit", actor, now, key, {"clearance": clearance})
         db.execute("INSERT INTO submission_keys VALUES (?, ?, ?, ?, ?, ?)", (actor["id"], shipment_id, idempotency_key, declaration["version"], declaration["content_hash"], _json(declaration)))
-        return declaration
+    _anchor(db_path, shipment_id, entry)
+    return declaration
 
 
 def review_declaration(db_path: str, shipment_id: str, decision: str, comment: str, actor: dict, now: str) -> dict:
@@ -491,8 +524,9 @@ def review_declaration(db_path: str, shipment_id: str, decision: str, comment: s
             raise ValueError("Only submitted declarations can be reviewed")
         declaration["status"] = decision
         declaration["updated_at"] = now
-        _store(db, declaration, "review", actor, now, key, {"decision": decision, "comment": comment})
-        return declaration
+        entry = _store(db, declaration, "review", actor, now, key, {"decision": decision, "comment": comment})
+    _anchor(db_path, shipment_id, entry)
+    return declaration
 
 
 def get_audit(db_path: str, shipment_id: str) -> list[dict]:
@@ -560,6 +594,31 @@ def verify_audit(db_path: str, shipment_id: str) -> dict:
                 not _declaration_matches(declaration, latest, expected_validation, shipment_id,
                                          expected_clearance)):
             invalid = len(rows) if rows else 1
+    anchor = ledger.compare(db_path, shipment_id, _local_hashes(rows))
+    if invalid is None and anchor["first_invalid_sequence"] is not None:
+        invalid = anchor["first_invalid_sequence"]  # local chain contradicts the witness quorum
     return {"valid": invalid is None, "entries_checked": checked,
             "first_invalid_sequence": invalid,
-            "disclaimer": "Hash-chain integrity only; not proof of authenticity or customs approval."}
+            "disclaimer": "Hash-chain integrity only; not proof of authenticity or customs approval.",
+            "ledger": {name: anchor[name] for name in (
+                "status", "reason", "anchored", "quorum", "nodes_total", "nodes_available",
+                "nodes_in_sync", "attested_sequence", "local_sequence")}}
+
+
+def _local_hashes(rows):
+    hashes = []
+    for row in rows:
+        try:
+            hashes.append(_parse_entry(row["entry_json"])["hash"])
+        except ValueError:
+            hashes.append(None)
+    return hashes
+
+
+def ledger_status(db_path: str, shipment_id: str) -> dict:
+    """Per-witness view of a shipment's chain head (simulated ledger, see ``ledger.py``)."""
+    with _session(db_path) as db:
+        rows = db.execute("SELECT sequence, entry_json FROM audit_entries WHERE shipment_id = ? ORDER BY sequence", (shipment_id,)).fetchall()
+    report = ledger.compare(db_path, shipment_id, _local_hashes(rows))
+    report.pop("first_invalid_sequence")
+    return {"shipment_id": shipment_id, **report, "disclaimer": ledger.DISCLAIMER}
