@@ -9,7 +9,7 @@ import {
   TrendingUp,
   Truck,
 } from "lucide-react";
-import { api, fmt } from "../lib";
+import { api, fmt, lookup, portShort } from "../lib";
 import type { CorridorSummary, SummaryKpi } from "../types";
 import "./minimal.css";
 
@@ -75,19 +75,21 @@ const W = 640;
 const H = 220;
 const PAD = 18;
 
-function linePath(values: number[]) {
-  if (values.length < 2) return "";
-  const min = Math.min(...values) * 0.95;
-  const max = Math.max(...values) * 1.02;
-  const span = max - min || 1;
-  return values
-    .map((v, i) => {
-      const x = PAD + (i * (W - PAD * 2)) / (values.length - 1);
-      const y = H - PAD - ((v - min) / span) * (H - PAD * 2);
-      return `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(" ");
+// Chart points in viewBox units. A flat series (min == max) sits at mid-height.
+function linePoints(values: number[]) {
+  const lo = Math.min(...values);
+  const hi = Math.max(...values);
+  const min = lo * 0.95;
+  const span = hi * 1.02 - min;
+  return values.map((v, i) => ({
+    x: values.length > 1 ? PAD + (i * (W - PAD * 2)) / (values.length - 1) : W / 2,
+    y: hi > lo && span > 0 ? H - PAD - ((v - min) / span) * (H - PAD * 2) : H / 2,
+  }));
 }
+const linePath = (pts: { x: number; y: number }[]) =>
+  pts.length < 2
+    ? ""
+    : pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
 
 // "2026-11-05" -> "05.11"
 const weekLabel = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
@@ -126,7 +128,10 @@ export function MinimalDashboard({ token }: { token?: string }) {
   const R = 58;
   const C = 2 * Math.PI * R;
   let offset = 0;
-  const series = ready ? ready.weekly.map((w) => w.shipments) : [];
+  // Weekly tonnage: the synthetic history has a constant count per week, so
+  // counts stay in the KPI card and the chart shows mass.
+  const series = ready ? ready.weekly.map((w) => w.tonnes) : [];
+  const points = series.length ? linePoints(series) : [];
   const total = series.reduce((a, b) => a + b, 0);
 
   return (
@@ -138,10 +143,10 @@ export function MinimalDashboard({ token }: { token?: string }) {
           <p className="md-caption">Синтетическая история · не операционные данные</p>
         </div>
         <div className="md-seg" role="group" aria-label="Период">
-          <button className={range === 4 ? "on" : ""} onClick={() => setRange(4)}>
+          <button type="button" className={range === 4 ? "on" : ""} aria-pressed={range === 4} onClick={() => setRange(4)}>
             4 нед.
           </button>
-          <button className={range === 13 ? "on" : ""} onClick={() => setRange(13)}>
+          <button type="button" className={range === 13 ? "on" : ""} aria-pressed={range === 13} onClick={() => setRange(13)}>
             13 нед.
           </button>
         </div>
@@ -150,7 +155,7 @@ export function MinimalDashboard({ token }: { token?: string }) {
       {error && (
         <article className="md-card md-error" role="alert">
           <span>{error}</span>
-          <button onClick={() => setAttempt((n) => n + 1)}>Повторить</button>
+          <button type="button" onClick={() => setAttempt((n) => n + 1)}>Повторить</button>
         </article>
       )}
 
@@ -192,17 +197,17 @@ export function MinimalDashboard({ token }: { token?: string }) {
             <article className="md-card md-chart">
               <div className="md-card-head">
                 <div>
-                  <h2>Объём перевозок</h2>
+                  <h2>Объём перевозок, т</h2>
                   <p className="md-muted">
                     {ready
-                      ? `Всего за период: ${fmt(total)} ед. · по неделям`
+                      ? `Всего за период: ${fmt(total, 1)} т · по неделям`
                       : "Загрузка…"}
                   </p>
                 </div>
               </div>
               {ready ? (
                 <>
-                  <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Линия числа перевозок по неделям">
+                  <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Масса перевезённых грузов по неделям, т">
                     {[0.25, 0.5, 0.75].map((t) => (
                       <line
                         key={t}
@@ -213,7 +218,12 @@ export function MinimalDashboard({ token }: { token?: string }) {
                         className="md-grid-line"
                       />
                     ))}
-                    <path d={linePath(series)} className="md-line" />
+                    <path d={linePath(points)} className="md-line" />
+                    {points.map((p, i) => (
+                      <circle key={i} cx={p.x} cy={p.y} r={3.5} className="md-point">
+                        <title>{`${weekLabel(ready.weekly[i].week_start)}: ${fmt(series[i], 1)} т`}</title>
+                      </circle>
+                    ))}
                   </svg>
                   <div className="md-axis">
                     {ready.weekly.map((w) => (
@@ -297,12 +307,13 @@ export function MinimalDashboard({ token }: { token?: string }) {
                   </thead>
                   <tbody>
                     {ready.recent_shipments.map((s) => {
-                      const st = statusMeta[s.status];
+                      const st = statusMeta[s.status] ?? { label: s.status, tone: "warn" };
                       return (
                         <tr key={s.id}>
                           <td className="mono">{s.id}</td>
                           <td>
-                            {s.origin_name} → {s.destination_name}
+                            {lookup(portShort, s.origin_id) ?? s.origin_name} →{" "}
+                            {lookup(portShort, s.destination_id) ?? s.destination_name}
                           </td>
                           <td className="num">{fmt(s.mass_tonnes, 1)} т</td>
                           <td>

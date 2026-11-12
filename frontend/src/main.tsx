@@ -47,6 +47,7 @@ import {
   api,
   date,
   docs,
+  fieldLabel,
   fmt,
   initialPayload,
   loadToken,
@@ -60,6 +61,7 @@ import {
   statuses,
   storeToken,
   toAmount,
+  translate,
 } from "./lib";
 
 const PAGES = [
@@ -194,7 +196,8 @@ function App() {
   };
   const switchShipment = (id: string) => {
     if (busy || id === selectedRef.current) return;
-    refreshVersion.current++;
+    // No refreshVersion bump: an in-flight refresh must still deliver its
+    // dashboard; its detail is dropped by the selectedRef check.
     selectedRef.current = id;
     setDetail(null);
     setForm(null);
@@ -357,14 +360,19 @@ function App() {
   // disabled buttons while a request is in flight.
   useEffect(() => {
     if (!busy) return;
+    const BUSY_TITLE = "Идёт запрос…";
     const titled: HTMLElement[] = [];
     document.querySelectorAll<HTMLButtonElement>("main button:disabled").forEach((b) => {
       if (!b.title) {
-        b.title = "Идёт запрос…";
+        b.title = BUSY_TITLE;
         titled.push(b);
       }
     });
-    return () => titled.forEach((b) => b.removeAttribute("title"));
+    // Only undo our own value: React may have set a real title meanwhile.
+    return () =>
+      titled.forEach((b) => {
+        if (b.title === BUSY_TITLE) b.removeAttribute("title");
+      });
   }, [busy]);
   const mutate = async (
     path: string,
@@ -441,24 +449,6 @@ function App() {
   const atRisk = dashboard?.summary.high_risk ?? 0;
   return (
     <div className="app">
-      <svg
-        className="goo-defs"
-        width="0"
-        height="0"
-        aria-hidden="true"
-        focusable="false"
-      >
-        <defs>
-          <filter id="goo" colorInterpolationFilters="sRGB">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur" />
-            <feColorMatrix
-              in="blur"
-              mode="matrix"
-              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -8"
-            />
-          </filter>
-        </defs>
-      </svg>
       <aside className="rail">
         <div className="rail-logo" title="Smart Caspian Transit">
           <Logo />
@@ -480,7 +470,6 @@ function App() {
           }}
         >
           <span className="nav-goo" aria-hidden="true">
-            <i />
             <i />
           </span>
           {PAGES.map(({ id, label, title, Icon }) => (
@@ -538,7 +527,6 @@ function App() {
             onClick={toggleTheme}
           >
             <span className="tt-goo" aria-hidden="true">
-              <i />
               <i />
             </span>
             <Moon size={17} />
@@ -808,7 +796,7 @@ function App() {
                         </button>
                         <button
                           type="button"
-                          disabled={busy || !d.preclearance || d.preclearance.status === "submitted" || d.preclearance.status === "needs_revision" ||
+                          disabled={busy || !d.preclearance || ["submitted", "auto_accepted", "demo_accepted", "needs_revision"].includes(d.preclearance.status) ||
                             JSON.stringify(form) !== JSON.stringify(d.preclearance.payload)}
                           className="secondary"
                           onClick={() =>
@@ -867,7 +855,7 @@ function App() {
                           <strong>Замечания проверки</strong>
                           {d.preclearance.validation.issues.map((issue, i) => (
                             <p key={i}>
-                              {issue.field}: {issue.message} ({issue.code})
+                              {fieldLabel(issue.field, displayedForm.documents)}: {translate(issue.message)}
                             </p>
                           ))}
                         </div>
@@ -1077,7 +1065,7 @@ function App() {
                         <strong>{date(metrics.split_at)}</strong>
                       </div>
                       <p className="micro">
-                        {metrics.disclaimer} ROC AUC может быть недоступен,
+                        {translate(metrics.disclaimer)} ROC AUC может быть недоступен,
                         если в тестовой выборке только один класс.
                       </p>
                     </section>
@@ -1192,7 +1180,8 @@ function ClearanceStepper({
   status?: string;
   dirty: boolean;
 }) {
-  const current = dirty
+  // needs_revision: the next step is saving a new draft version.
+  const current = dirty || status === "needs_revision"
     ? 0
     : status === "ready"
       ? 2

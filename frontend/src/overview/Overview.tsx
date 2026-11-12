@@ -291,7 +291,6 @@ export function Overview({
         >
           <span className="seg-goo" aria-hidden="true">
             <i />
-            <i />
           </span>
           <button
             type="button"
@@ -450,8 +449,9 @@ export function Overview({
         <div className="tools reveal" style={order(1)}>
           <div className="tool-group">
             <span className="tool-label">Вид</span>
-            <span className="tool on">
-              <MapIcon size={16} /> Геосхема
+            <span className="tool on" title="Геосхема">
+              <MapIcon size={16} aria-hidden="true" />
+              <span className="tool-name">Геосхема</span>
             </span>
           </div>
           <div className="tool-group">
@@ -461,25 +461,31 @@ export function Overview({
                 type="button"
                 className={"tool" + (showAlts ? " on" : "")}
                 aria-pressed={showAlts}
+                title="Альтернативы"
                 onClick={() => setShowAlts((v) => !v)}
               >
-                <Split size={16} /> Альтернативы
+                <Split size={16} aria-hidden="true" />
+                <span className="tool-name">Альтернативы</span>
               </button>
               <button
                 type="button"
                 className={"tool" + (showLabels ? " on" : "")}
                 aria-pressed={showLabels}
+                title="Подписи"
                 onClick={() => setShowLabels((v) => !v)}
               >
-                <Tag size={16} /> Подписи
+                <Tag size={16} aria-hidden="true" />
+                <span className="tool-name">Подписи</span>
               </button>
               <button
                 type="button"
                 className={"tool" + (showLoad ? " on" : "")}
                 aria-pressed={showLoad}
+                title="Загрузка узлов"
                 onClick={() => setShowLoad((v) => !v)}
               >
-                <Gauge size={16} /> Загрузка узлов
+                <Gauge size={16} aria-hidden="true" />
+                <span className="tool-name">Загрузка узлов</span>
               </button>
             </div>
           </div>
@@ -602,7 +608,8 @@ export function Overview({
                       <div>
                         <strong>{translate(e.event_type)}</strong>
                         <small>
-                          {name(e.location_id)} · {e.source} / {e.quality_flag}
+                          {name(e.location_id)} · {translate(e.source)} /{" "}
+                          {translate(e.quality_flag)}
                         </small>
                       </div>
                     </div>
@@ -922,7 +929,7 @@ export function Overview({
             <div className="source-note">
               <CircleHelp size={15} />
               <span>
-                Погода: {d.weather.source}
+                Погода: {translate(d.weather.source)}
                 {d.weather.stale ? " (устарела)" : ""}, базовый ветер{" "}
                 {fmt(d.weather.wind_mps, 1)} м/с
                 {d.weather.wave_height_m != null &&
@@ -931,7 +938,7 @@ export function Overview({
                   ` · ветер сценария: ${fmt(d.scenario.wind_mps, 1)} м/с`}
                 {d.scenario.wave_height_m != null &&
                   ` · волнение сценария: ${fmt(d.scenario.wave_height_m, 1)} м`}{" "}
-                · прогноз: {d.prediction.data_source},{" "}
+                · прогноз: {translate(d.prediction.data_source)},{" "}
                 {d.prediction.model_version}. Расписание и показатели
                 демонстрационные.
               </span>

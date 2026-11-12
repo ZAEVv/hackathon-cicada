@@ -238,6 +238,9 @@ export function HubPanel({
                         : "")
                     }
                     style={{ opacity: 0.3 + 0.7 * Math.min(1, peak) }}
+                    // 8 hubs x 24 cells: keyboard users move through
+                    // time with the slider instead of ~200 tab stops.
+                    tabIndex={-1}
                     onClick={() => onHour(start)}
                     title={`${name(hub.port_id)} · +${start} ч · ${percent(peak)}`}
                     aria-label={`${name(hub.port_id)}, +${start} ч, загрузка ${percent(peak)}`}
