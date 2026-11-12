@@ -12,6 +12,7 @@ services:
       DEMO_DISABLE_DEFAULT_TOKENS: ${DEMO_DISABLE_DEFAULT_TOKENS:-}
       ENABLE_API_DOCS: ${ENABLE_API_DOCS:-}
       AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:-}
+      LEDGER_WITNESS_KEYS: ${LEDGER_WITNESS_KEYS:-}
     volumes:
       - caspian-data:/data
     restart: unless-stopped

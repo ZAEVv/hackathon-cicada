@@ -15,6 +15,10 @@ RUN npm run build
 FROM python:3.12-slim-bookworm
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1 \
     DATABASE_PATH=/data/smart_caspian_demo.sqlite3
 # Node is needed only to run `vite preview`.
 COPY --from=web /usr/local/bin/node /usr/local/bin/node
