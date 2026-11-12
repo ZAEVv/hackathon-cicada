@@ -15,13 +15,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from . import data, hubs, preclearance, predictive, routing, security, summary
+from . import data, hubs, ledger, preclearance, predictive, routing, security, summary
 from .schemas import (
     SIMULATION_NOW, CorridorSummary, AuditEntry, AuditVerification, ChooseRouteRequest,
     Dashboard, Declaration, Ruleset, DeclarationInput, IdempotencyKey, ModelMetrics,
     ReviewRequest, ScenarioRequest, ShipmentDetail, ShipmentId,
 )
 from .schemas import HubForecast
+from .schemas import LedgerStatus
 
 logger = logging.getLogger("sct")
 
@@ -114,6 +115,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         app.state.scenarios = {}
         app.state.selected = {}
         preclearance.init_db(app.state.db)
+        ledger.init_witnesses(app.state.db)  # simulated in-process witness nodes
         yield
 
     docs = _truthy("ENABLE_API_DOCS")
@@ -335,6 +337,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def verify(shipment_id: ShipmentId):
         shipment(shipment_id)
         return preclearance.verify_audit(app.state.db, shipment_id)
+
+    @app.get("/api/shipments/{shipment_id}/ledger", response_model=LedgerStatus, dependencies=authenticated)
+    def ledger_view(shipment_id: ShipmentId):
+        shipment(shipment_id)
+        return preclearance.ledger_status(app.state.db, shipment_id)
 
     @app.get("/api/hubs/forecast", response_model=HubForecast, dependencies=authenticated)
     def hub_forecast(shipment_id: Annotated[ShipmentId | None, Query()] = None):

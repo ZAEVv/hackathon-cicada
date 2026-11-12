@@ -34,6 +34,7 @@ import type {
   Dashboard,
   Declaration,
   Detail,
+  LedgerStatus,
   Metrics,
   Payload,
   Port,
@@ -49,6 +50,9 @@ import {
   docs,
   fmt,
   initialPayload,
+  ledgerNodeLabels,
+  ledgerStateLabels,
+  ledgerStatusNotes,
   loadToken,
   lookup,
   newIdempotencyKey,
@@ -147,6 +151,7 @@ function App() {
     [form, setForm] = useState<Payload | null>(null),
     [audit, setAudit] = useState<Audit[]>([]),
     [verification, setVerification] = useState<Verification | null>(null),
+    [ledgerView, setLedgerView] = useState<LedgerStatus | null>(null),
     [comment, setComment] = useState(""),
     [toast, setToast] = useState(""),
     [ruleset, setRuleset] = useState<Ruleset | null>(null);
@@ -200,6 +205,7 @@ function App() {
     setForm(null);
     setAudit([]);
     setVerification(null);
+    setLedgerView(null);
     setSelected(id);
   };
   switchRef.current = switchShipment;
@@ -262,8 +268,9 @@ function App() {
         {},
         authToken,
       ),
+      loadLedger(selected),
     ])
-      .then(([d, a]) => {
+      .then(([d, a, l]) => {
         if (active && selectedRef.current === selected) {
           setDetail(d);
           // Keep unsaved edits when only the token changed (switchShipment
@@ -271,6 +278,7 @@ function App() {
           setForm((prev) => prev ?? (d.preclearance?.payload || initialPayload(d)));
           setAudit(a);
           setVerification(null);
+          setLedgerView(l);
         }
       })
       .catch((e) => {
@@ -399,6 +407,8 @@ function App() {
           ),
         );
         setVerification(null);
+        const l = await loadLedger(selected);
+        if (selectedRef.current === selected) setLedgerView(l);
       }
       await refresh(selected);
       const okMsg = TOAST_BY_PATH[path];
@@ -410,6 +420,13 @@ function App() {
       setBusy(false);
     }
   };
+  // Ledger status is supplementary: a failure never blocks the audit card.
+  const loadLedger = (id: string) =>
+    api<LedgerStatus>(
+      `/shipments/${encodeURIComponent(id)}/ledger`,
+      {},
+      authToken,
+    ).catch(() => null);
   const verify = async () => {
     const target = selected;
     try {
@@ -419,6 +436,8 @@ function App() {
         authToken,
       );
       if (selectedRef.current === target) setVerification(result);
+      const l = await loadLedger(target);
+      if (selectedRef.current === target) setLedgerView(l);
     } catch (e) {
       if (selectedRef.current === target) setError((e as Error).message);
     }
@@ -960,6 +979,51 @@ function App() {
                                 ? ` · ошибка №${verification.first_invalid_sequence}`
                                 : ""}
                             </span>
+                          </div>
+                        )}
+                        {ledgerView && (
+                          <div
+                            className={`ledger-row ledger-${ledgerView.status}`}
+                          >
+                            <div className="ledger-summary">
+                              <ShieldCheck size={14} />
+                              <span>
+                                Распределённый реестр:{" "}
+                                {ledgerView.nodes_in_sync} из{" "}
+                                {ledgerView.nodes_total} узлов подтвердили ·
+                                кворум {ledgerView.quorum} из{" "}
+                                {ledgerView.nodes_total}
+                                {lookup(ledgerStatusNotes, ledgerView.status)
+                                  ? ` · ${lookup(ledgerStatusNotes, ledgerView.status)}`
+                                  : ""}
+                              </span>
+                            </div>
+                            <div className="ledger-nodes">
+                              {ledgerView.nodes.map((n) => (
+                                <span
+                                  key={n.node_id}
+                                  className={`ledger-chip ${n.state}`}
+                                  title={`${
+                                    lookup(ledgerStateLabels, n.state) ?? n.state
+                                  }${
+                                    n.last_sequence != null
+                                      ? ` · запись №${n.last_sequence}`
+                                      : ""
+                                  }${
+                                    n.head_hash
+                                      ? ` · ${shortHash(n.head_hash)}`
+                                      : ""
+                                  }`}
+                                >
+                                  <span className="ledger-dot" />
+                                  {lookup(ledgerNodeLabels, n.node_id) ?? n.label}
+                                </span>
+                              ))}
+                            </div>
+                            <p className="micro ledger-micro">
+                              Узлы моделируются в одном процессе; это прототип,
+                              не промышленный реестр.
+                            </p>
                           </div>
                         )}
                         <p className="micro">

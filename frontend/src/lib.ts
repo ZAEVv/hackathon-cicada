@@ -347,3 +347,23 @@ export const ruleLabels: Record<string, string> = {
   R5: "Страна происхождения в списке разрешённых",
 };
 export const shortHash = (hash: string) => hash.slice(0, 12);
+
+// Witness-ledger node labels and chip states (simulated in-process nodes).
+export const ledgerNodeLabels: Record<string, string> = {
+  "customs-ru": "Таможня РФ",
+  "customs-ir": "Таможня Ирана",
+  "port-operator": "Оператор порта",
+};
+export const ledgerStateLabels: Record<string, string> = {
+  in_sync: "синхронизирован",
+  behind: "отстаёт",
+  diverged: "расхождение",
+  invalid_signature: "неверная подпись",
+  unavailable: "недоступен",
+};
+export const ledgerStatusNotes: Record<string, string> = {
+  not_anchored: "последние записи не закреплены",
+  conflict: "локальная цепочка расходится с реестром",
+  no_quorum: "кворум недоступен",
+  disabled: "реестр отключён",
+};
