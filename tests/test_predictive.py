@@ -5,10 +5,23 @@ import math
 
 import numpy as np
 import pytest
-from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor
 
 from backend.app.predictive import predict, train_model
 from backend.app.schemas import ModelMetrics, Prediction
+
+CALIBRATION_FACTOR = "Miss probability from synthetic forecast-error spread; not guaranteed calibrated"
+
+
+class ZeroDelay:
+    """Regressor stub: no additional delay, records the features it was given."""
+
+    def __init__(self):
+        self.seen = []
+
+    def predict(self, features):
+        self.seen.append(features.copy())
+        return np.zeros(len(features))
 
 
 def history_rows(count=100):
@@ -50,19 +63,29 @@ def test_chronological_split_baseline_and_no_holdout_leakage():
     baseline = np.median([row["delay_hours"] for row in rows[:80]])
     expected = np.mean([abs(row["delay_hours"] - baseline) for row in rows[80:]])
     assert metrics["baseline_mae_hours"] == pytest.approx(expected)
-    assert isinstance(model.regressor, GradientBoostingRegressor)
-    assert isinstance(model.classifier, GradientBoostingClassifier)
+    assert isinstance(model.regressor, HistGradientBoostingRegressor)
+    assert len(model.residuals) == 20  # last quarter of the 80 training rows
     assert metrics["roc_auc"] is not None
     changed = deepcopy(rows)
     for row in changed[80:]:
         row["delay_hours"] += 1000
         row["missed_connection"] = 1 - row["missed_connection"]
         row["wind_mps"] += 100
+        row["hours_to_cutoff"] += 100
     other, _ = train_model(changed)
-    probe = np.asarray([[0.5, 6, 0, 0, 20, 6], [5, 22, 0, 3, 20, 6]])
+    probe = np.asarray([[0.5, 6, 0, 0, 20], [5, 22, 0, 3, 20]])
     np.testing.assert_array_equal(model.regressor.predict(probe), other.regressor.predict(probe))
-    np.testing.assert_array_equal(model.classifier.predict_proba(probe), other.classifier.predict_proba(probe))
+    np.testing.assert_array_equal(model.residuals, other.residuals)
     assert rows == snapshot
+
+
+def test_forecast_is_monotonic_in_wind_queue_and_known_delay():
+    model, _ = train_model(history_rows())
+    for column, values in ((0, np.linspace(0, 12, 25)), (1, np.linspace(0, 40, 41)),
+                           (2, np.linspace(0, 30, 16)), (3, np.linspace(0, 8, 17))):
+        probe = np.tile([1.0, 10.0, 0.0, 0.0, 20.0], (len(values), 1))
+        probe[:, column] = values
+        assert (np.diff(model.regressor.predict(probe)) >= 0).all()
 
 
 def test_repeatable_schema_normal_and_storm(inputs):
@@ -101,10 +124,10 @@ def test_known_effects_counted_once_and_documents_are_maximum(inputs):
     result = predict(model, shipment, weather, scenario)
     assert result["ready_at"] == shipment["documents_ready_at"]
     assert "Documents determine readiness" in result["factors"]
-    assert "Known documents readiness after demo cutoff; not modeled by classifier" in result["factors"]
-    assert "Synthetic classifier estimate; not guaranteed calibrated" in result["factors"]
-    assert result["miss_probability"] == 0
-    assert result["risk"] == "low"  # Classifier output is not a routing feasibility rule.
+    assert "Documents ready after cutoff" in result["factors"]
+    assert CALIBRATION_FACTOR in result["factors"]
+    assert result["miss_probability"] == 1
+    assert result["risk"] == "high"  # Late documents miss the cutoff whatever the model says.
 
 
 @pytest.mark.parametrize("label", [0, 1])
@@ -116,19 +139,24 @@ def test_small_single_class_history(inputs, label, count):
     model, metrics = train_model(rows)
     assert metrics["roc_auc"] is None
     assert metrics["test_rows"] >= 1
+    assert len(model.residuals) >= 1 and np.isfinite(model.residuals).all()
+    # Labels only score the holdout; they never drive the forecast.
+    relabelled = deepcopy(rows)
+    for row in relabelled:
+        row["missed_connection"] = 1 - label
     result = predict(model, *inputs)
-    assert result["miss_probability"] == label
-    assert result["risk"] == ("high" if label else "low")
+    Prediction.model_validate(result)
+    assert result == predict(train_model(relabelled)[0], *inputs)
 
 
-def test_single_class_train_two_class_holdout(inputs):
+def test_two_class_holdout_reports_auc(inputs):
     rows = history_rows(10)
     for row in rows:
         row["missed_connection"] = 0
     rows[-1]["missed_connection"] = 1
     model, metrics = train_model(rows)
-    assert metrics["roc_auc"] == 0.5
-    assert predict(model, *inputs)["miss_probability"] == 0
+    assert 0 <= metrics["roc_auc"] <= 1
+    Prediction.model_validate(predict(model, *inputs))
 
 
 def test_only_prediction_time_features_used(inputs):
@@ -142,54 +170,57 @@ def test_only_prediction_time_features_used(inputs):
 
 def test_feature_order_cutoff_and_overrides(inputs):
     model, _ = train_model(history_rows())
-    captured = []
-    class Recorder:
-        def predict(self, features):
-            captured.append(features.copy())
-            return np.array([0.0])
-    object.__setattr__(model, "regressor", Recorder())
+    recorder = ZeroDelay()
+    object.__setattr__(model, "regressor", recorder)
+    object.__setattr__(model, "residuals", np.array([-1.0, 0.0, 0.4, 0.6]))
     shipment, weather, scenario = deepcopy(inputs)
     shipment.update(observed_delay_hours=1, planned_port_arrival="2026-11-13T10:00:00Z")
     scenario.update(arrival_delay_hours=3, queue_extra_hours=2, wind_mps=22)
-    predict(model, shipment, weather, scenario)
-    np.testing.assert_array_equal(captured[-1], [[2.5, 22, 0, 4, 20, -21]])
-    shipment["id"] = "SCT-002"
-    predict(model, shipment, weather, scenario)
-    np.testing.assert_array_equal(captured[-1], [[2.5, 22, 0, 4, 20, 3]])
+    # Known readiness: 10:00 + 1 + 3 observed/scenario + .5 + 2 queue + 1 handling = 17:30.
+    default = predict(model, shipment, weather, scenario)
+    np.testing.assert_array_equal(recorder.seen[-1], [[2.5, 22, 0, 4, 20]])
+    assert default["miss_probability"] == 1  # Fallback cutoff: arrival day 14:00Z.
+    assert "Readiness after demo cutoff" in default["factors"]
+    planned = predict(model, shipment, weather, scenario, cutoff="2026-11-13T18:00:00Z")
+    np.testing.assert_array_equal(recorder.seen[-1], recorder.seen[0])  # Cutoff is not a delay driver.
+    assert planned["ready_at"] == default["ready_at"] == "2026-11-13T17:30:00Z"
+    assert planned["miss_probability"] == 0.25  # Only the +0.6h error exceeds the 0.5h budget.
+    assert "Readiness within demo cutoff" in planned["factors"]
+    with pytest.raises(ValueError):
+        predict(model, shipment, weather, scenario, cutoff="2026-11-13T18:00:00")
 
 
-def test_same_arrival_slack_same_probability_independent_of_early_clock(inputs):
+def test_forecast_does_not_depend_on_prediction_clock(inputs):
     model, _ = train_model(history_rows())
-    features_seen = []
-    original = model.classifier
-
-    class Recorder:
-        classes_ = original.classes_
-
-        def predict_proba(self, features):
-            features_seen.append(features.copy())
-            return original.predict_proba(features)
-
-    object.__setattr__(model, "classifier", Recorder())
     early = predict(model, *inputs, now="2026-11-12T08:00:00Z")
-    later = predict(model, *inputs, now="2026-11-12T10:30:00Z")
-    assert early["miss_probability"] == later["miss_probability"]
-    np.testing.assert_array_equal(features_seen[0], features_seen[1])
-    assert features_seen[0][0, -1] == 3  # 14:00 - (10:00 arrival + 1h handling).
-    predict(model, *inputs, now="2026-11-12T12:00:00Z")
-    assert features_seen[-1][0, -1] == 2  # Clock consumes slack only after baseline.
+    assert early == predict(model, *inputs, now="2026-11-12T10:30:00Z")
+    assert early == predict(model, *inputs, now="2026-11-12T12:00:00Z")
 
 
-def test_documents_beyond_cutoff_dont_override_classifier(inputs):
+def test_probability_agrees_with_readiness(inputs):
+    model, _ = train_model(history_rows())
+    object.__setattr__(model, "regressor", ZeroDelay())
+    object.__setattr__(model, "residuals", np.zeros(5))
+    shipment, weather, scenario = deepcopy(inputs)
+    on_time = predict(model, shipment, weather, scenario)  # Ready 11:30, cutoff 14:00.
+    assert (on_time["miss_probability"], on_time["risk"]) == (0, "low")
+    scenario["queue_extra_hours"] = 3  # Ready 14:30.
+    late = predict(model, shipment, weather, scenario)
+    assert (late["miss_probability"], late["risk"]) == (1, "high")
+    assert "Readiness after demo cutoff" in late["factors"]
+
+
+def test_documents_beyond_cutoff_force_a_miss(inputs):
     model, _ = train_model(history_rows())
     shipment, weather, scenario = deepcopy(inputs)
-    before = predict(model, shipment, weather, scenario)
     shipment["documents_ready_at"] = "2026-11-12T20:00:00Z"
     after = predict(model, shipment, weather, scenario)
     assert after["ready_at"] == shipment["documents_ready_at"]
-    assert after["miss_probability"] == before["miss_probability"]
-    assert after["risk"] == before["risk"]
-    assert "Known documents readiness after demo cutoff; not modeled by classifier" in after["factors"]
+    assert after["miss_probability"] == 1
+    assert after["risk"] == "high"
+    assert "Documents ready after cutoff" in after["factors"]
+    relaxed = predict(model, shipment, weather, scenario, cutoff="2026-11-12T20:00:00Z")
+    assert "Documents ready after cutoff" not in relaxed["factors"]  # Equality is on time.
 
 
 def test_readiness_exactly_at_cutoff_is_allowed(inputs):
@@ -202,6 +233,7 @@ def test_readiness_exactly_at_cutoff_is_allowed(inputs):
     result = predict(model, shipment, weather, scenario)
     assert result["ready_at"] == "2026-11-12T14:00:00Z"
     assert "Readiness within demo cutoff" in result["factors"]
+    assert result["miss_probability"] == 0
 
 
 @pytest.mark.parametrize("change", [
@@ -247,22 +279,56 @@ def test_generated_demo_history_and_cutoff():
         "kind": "storm", "arrival_delay_hours": 3, "queue_extra_hours": 2, "wind_mps": 22,
     })
     assert metrics["model_mae_hours"] < metrics["baseline_mae_hours"]
+    assert metrics["roc_auc"] > 0.8
     assert normal["delay_hours"] < 2
     assert normal["ready_at"] < "2026-11-12T14:00:00Z"
+    assert normal["risk"] == "low"
     assert storm["ready_at"] > "2026-11-12T14:00:00Z"
+    assert (storm["miss_probability"], storm["risk"]) == (1, "high")
+
+
+def test_demo_cutoffs_come_from_planned_services():
+    from backend.app.data import get_weather, load_demo_data
+    from backend.app.routing import compute_routes, planned_cutoff, scenario_profile
+
+    catalog = load_demo_data()
+    model, _ = train_model(catalog["history"])
+    cutoffs = {row["id"]: planned_cutoff(row, catalog["services"]) for row in catalog["shipments"]}
+    assert cutoffs["SCT-001"] == "2026-11-12T14:00:00Z"  # sea-main 18:00Z minus 4h.
+    assert cutoffs["SCT-002"] == "2026-11-12T17:30:00Z"  # transfer-olya 18:00Z minus 0.5h.
+    for shipment in catalog["shipments"]:
+        weather = get_weather(shipment["current_location_id"])
+        for kind in ("none", "storm", "congestion"):
+            profile = scenario_profile(kind)
+            forecast = predict(model, shipment, weather, profile, cutoff=cutoffs[shipment["id"]])
+            route = compute_routes(shipment, catalog["ports"], catalog["services"], forecast, profile)
+            # The point forecast and the scheduler judge the same departure.
+            late = forecast["ready_at"] > cutoffs[shipment["id"]]
+            assert route["current_route"]["missed_connection"] == late
+            assert ("Readiness after demo cutoff" in forecast["factors"]) == late
+
+
+def test_planned_cutoff_without_a_planned_departure():
+    from backend.app.data import load_demo_data
+    from backend.app.routing import planned_cutoff
+
+    catalog = load_demo_data()
+    shipment = catalog["shipments"][0]
+    shipment["planned_service_ids"] = ["rail-main"]  # Nothing planned onward from the port.
+    assert planned_cutoff(shipment, catalog["services"]) is None
 
 
 @pytest.mark.parametrize("probability,risk", [(0, "low"), (0.349, "low"), (0.35, "medium"),
                                            (0.699, "medium"), (0.7, "high"), (1, "high")])
 def test_risk_thresholds(inputs, probability, risk):
     model, _ = train_model(history_rows(2))
-    class ConstantProbability:
-        classes_ = np.array([0, 1])
-
-        def predict_proba(self, features):
-            return np.array([[1 - probability, probability]])
-    object.__setattr__(model, "classifier", ConstantProbability())
-    assert predict(model, *inputs)["risk"] == risk
+    object.__setattr__(model, "regressor", ZeroDelay())
+    residuals = np.zeros(1000)
+    residuals[:round(probability * 1000)] = 100.0  # That share of errors misses the cutoff.
+    object.__setattr__(model, "residuals", residuals)
+    result = predict(model, *inputs)
+    assert result["miss_probability"] == probability
+    assert result["risk"] == risk
 
 
 @pytest.mark.parametrize("section,key,value", [

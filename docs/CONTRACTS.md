@@ -63,28 +63,35 @@ def predict(model: object, shipment: dict, weather: dict,
             scenario: dict, now: str = "2026-11-12T08:00:00Z") -> dict: ... # Prediction
 ```
 
-Chronological first 80% train / last 20% test, no shuffle; fit GBM regressor and
-classifier (constant fallback for single-class training). Train-only median delay baseline,
-MAE both, ROC AUC if test has both classes else null. No future actual timestamps as features.
-Feature order is queue_hours, wind_mps, precipitation_mm, observed_delay_hours,
-mass_tonnes, hours_to_cutoff. The history field hours_to_cutoff means remaining slack
-for variable observed/queue/additional delays, beyond baseline arrival plus one hour
-handling, NOT elapsed time from the prediction clock to cutoff. Use fixed Nov 12 14:00Z
-for SCT-001; other shipments use their arrival day's 14:00Z demo cutoff. At inference,
-`hours_to_cutoff = (cutoff - max(now, planned_port_arrival + 1 hour)) / 1 hour`.
-Before baseline readiness, advancing only the clock leaves this slack unchanged.
-The synthetic generator labels observed_delay + queue + additional_delay > slack as
-missed; equality is accepted, matching actual scheduling readiness <= cutoff.
+Chronological first 80% train / last 20% test, no shuffle. One monotonic
+HistGradientBoosting regressor (non-decreasing in queue, wind, precipitation and known
+delay; mean fallback below 20 training rows). There is no separate classifier.
+Train-only median delay baseline, MAE both; ROC AUC of `miss_probability` against holdout
+`missed_connection` if the test set has both classes, else null. No future actual
+timestamps as features. Feature order is queue_hours, wind_mps, precipitation_mm,
+observed_delay_hours, mass_tonnes. `hours_to_cutoff` stays in history (remaining slack
+beyond baseline arrival plus one hour handling) but only scores holdout labels; it is not
+a delay driver. The synthetic generator labels observed_delay + queue + additional_delay >
+slack as missed; equality is accepted, matching scheduling readiness <= cutoff.
 Scenario arrival delay augments observed_delay; queue_extra augments queue; wind override applies.
 `delay_hours` is predicted additional delay; readiness formula:
 `max(planned_port_arrival + observed_delay + scenario.arrival_delay + queue_hours
 + scenario.queue_extra + 1 hour handling + delay_hours, documents_ready_at)`.
-No double counting observed delay in predicted target. `miss_probability` is an uncalibrated
-synthetic classifier estimate, not a guaranteed probability; `risk` low <.35, medium <.7,
-high otherwise. Documents are absent from history features: known documents readiness
-after cutoff gets an explicit factor and still governs ready_at, but does not trigger a
-post-hoc probability/risk override. Factors also identify the synthetic, not-guaranteed
-calibration status; they are deterministic input explanations, not fabricated SHAP.
+No double counting observed delay in predicted target.
+
+Cutoff: `predict(..., cutoff=routing.planned_cutoff(original_shipment, services, now))`,
+i.e. the cutoff of the first originally planned departure, the same departure the route
+baseline measures `missed_connection` against (SCT-001: sea-main 18:00Z - 4h = 14:00Z;
+SCT-002: transfer-olya 18:00Z - 0.5h = 17:30Z). Without a cutoff, the arrival day's 14:00Z
+is assumed. The prediction clock does not change the forecast.
+
+`miss_probability` = share of forecast errors (residuals of the last quarter of training
+rows, scored by a model fitted on the rows before them) for which delay_hours + error
+would push readiness past the cutoff. Documents ready after the cutoff give probability 1.
+So probability, ready_at and route feasibility cannot contradict each other. It is a
+synthetic estimate, not a guaranteed calibrated probability; `risk` low <.35, medium <.7,
+high otherwise. Factors also identify the synthetic, not-guaranteed calibration status;
+they are deterministic input explanations, not fabricated SHAP.
 
 ## Routing / ESG owner
 
@@ -239,7 +246,7 @@ Routes here cover remaining legs only. Frontend must not hardcode these numeric 
     "observed_at":"2026-11-12T08:00:00Z","stale":false},
   "scenario":{"kind":"none","arrival_delay_hours":0,"queue_extra_hours":0,"wind_mps":null,"blocked_service_ids":[]},
   "prediction":{"delay_hours":0.5,"ready_at":"2026-11-12T12:00:00Z","miss_probability":0.12,
-    "risk":"low","factors":["Low wind","Short terminal queue"],"model_version":"gbm-demo-v1","data_source":"synthetic"},
+    "risk":"low","factors":["Low wind","Short terminal queue"],"model_version":"gbm-demo-v2","data_source":"synthetic"},
   "current_route":{
     "id":"sea-main@2026-11-12T18:00:00Z+road-final@2026-11-14T00:00:00Z",
     "label":"Planned Caspian crossing","feasible":true,"reason":null,"missed_connection":false,
