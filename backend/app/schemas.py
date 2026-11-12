@@ -298,3 +298,56 @@ class ModelMetrics(Contract):
     model_mae_hours: float
     roc_auc: float | None = None
     disclaimer: str = "Held-out synthetic history; not validated on real Caspian operations."
+
+
+# --- Hub load / bottleneck forecast (backend/app/hubs.py) --------------------
+class HubPoint(Contract):
+    at: str
+    offset_hours: int = Field(ge=0)
+    utilization: float = Field(ge=0, allow_inf_nan=False)
+    load_tph: float = Field(ge=0, allow_inf_nan=False)
+    capacity_tph: float = Field(gt=0, allow_inf_nan=False)
+    background_tph: float = Field(ge=0, allow_inf_nan=False)
+    shipments_tph: float = Field(ge=0, allow_inf_nan=False)
+    queue_hours: float = Field(ge=0, allow_inf_nan=False)
+    shipment_ids: list[str]
+
+
+class HubSeries(Contract):
+    port_id: str
+    nominal_capacity_tph: float = Field(gt=0)
+    peak_utilization: float = Field(ge=0)
+    peak_at: str
+    max_queue_hours: float = Field(ge=0)
+    status: Literal["ok", "busy", "bottleneck"]
+    bottleneck_count: int = Field(ge=0)
+    points: list[HubPoint]
+
+
+class BottleneckWindow(Contract):
+    port_id: str
+    start_at: str
+    end_at: str
+    start_offset_hours: int = Field(ge=0)
+    end_offset_hours: int = Field(ge=0)
+    peak_at: str
+    peak_utilization: float = Field(ge=0)
+    max_queue_hours: float = Field(ge=0)
+    severity: Literal["medium", "high"]
+    reasons: list[str]
+    shipment_ids: list[str]
+
+
+class HubForecast(Contract):
+    simulation_now: str = SIMULATION_NOW
+    synthetic: bool = True
+    horizon_hours: int
+    step_hours: int
+    bottleneck_threshold: float
+    busy_threshold: float
+    regional_scenario: ScenarioKind
+    focus_shipment_id: str | None = None
+    hubs: list[HubSeries]
+    bottlenecks: list[BottleneckWindow]
+    background_source: str
+    disclaimer: str

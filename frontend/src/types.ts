@@ -146,3 +146,51 @@ export type Verification = {
   first_invalid_sequence: number | null;
   disclaimer: string;
 };
+export type HubPoint = {
+  at: string;
+  offset_hours: number;
+  utilization: number;
+  load_tph: number;
+  capacity_tph: number;
+  background_tph: number;
+  shipments_tph: number;
+  queue_hours: number;
+  shipment_ids: string[];
+};
+export type HubSeries = {
+  port_id: string;
+  nominal_capacity_tph: number;
+  peak_utilization: number;
+  peak_at: string;
+  max_queue_hours: number;
+  status: string;
+  bottleneck_count: number;
+  points: HubPoint[];
+};
+export type BottleneckWindow = {
+  port_id: string;
+  start_at: string;
+  end_at: string;
+  start_offset_hours: number;
+  end_offset_hours: number;
+  peak_at: string;
+  peak_utilization: number;
+  max_queue_hours: number;
+  severity: string;
+  reasons: string[];
+  shipment_ids: string[];
+};
+export type HubForecast = {
+  simulation_now: string;
+  synthetic: boolean;
+  horizon_hours: number;
+  step_hours: number;
+  bottleneck_threshold: number;
+  busy_threshold: number;
+  regional_scenario: string;
+  focus_shipment_id: string | null;
+  hubs: HubSeries[];
+  bottlenecks: BottleneckWindow[];
+  background_source: string;
+  disclaimer: string;
+};

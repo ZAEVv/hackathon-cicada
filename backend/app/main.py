@@ -9,18 +9,19 @@ import os
 from threading import RLock
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from . import data, preclearance, predictive, routing, security
+from . import data, hubs, preclearance, predictive, routing, security
 from .schemas import (
     SIMULATION_NOW, AuditEntry, AuditVerification, ChooseRouteRequest,
     Dashboard, Declaration, DeclarationInput, IdempotencyKey, ModelMetrics,
     ReviewRequest, ScenarioRequest, ShipmentDetail, ShipmentId,
 )
+from .schemas import HubForecast
 
 logger = logging.getLogger("sct")
 
@@ -322,6 +323,19 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def verify(shipment_id: ShipmentId):
         shipment(shipment_id)
         return preclearance.verify_audit(app.state.db, shipment_id)
+
+    @app.get("/api/hubs/forecast", response_model=HubForecast, dependencies=authenticated)
+    def hub_forecast(shipment_id: Annotated[ShipmentId | None, Query()] = None):
+        # Every shipment's own scenario is already in its route (detail()); the
+        # requested shipment's scenario is also the regional condition (hubs.py).
+        with lock:
+            if shipment_id is not None:
+                shipment(shipment_id)
+            details = [detail(sid).model_dump() for sid in app.state.shipments]
+            regional = routing.scenario_profile(
+                app.state.scenarios.get(shipment_id, "none") if shipment_id else "none")
+            return hubs.forecast(app.state.catalog["ports"], app.state.catalog["services"], details,
+                                 regional, SIMULATION_NOW, focus_shipment_id=shipment_id)
 
     return app
 
