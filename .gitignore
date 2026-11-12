@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.sqlite3*
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+artifacts/
+# Local secrets: any .env variant except the committed template
+.env.*
+!.env.example
+# Optional Open-Meteo weather cache (and its .tmp) if written into the tree
+*weather*cache*.json*
+# Editor / OS files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

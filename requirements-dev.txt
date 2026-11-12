@@ -1,0 +1,4 @@
+-r requirements.txt
+# Test-only: httpx is required by fastapi.testclient.TestClient; pytest runs tests/.
+httpx>=0.27,<1
+pytest>=8,<10
