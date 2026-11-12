@@ -96,11 +96,16 @@ export type Detail = {
   weather: {
     wind_mps: number;
     precipitation_mm: number;
+    wave_height_m?: number | null;
     source: string;
     observed_at: string;
     stale: boolean;
   };
-  scenario: { kind: string; wind_mps?: number | null };
+  scenario: {
+    kind: string;
+    wind_mps?: number | null;
+    wave_height_m?: number | null;
+  };
   prediction: {
     delay_hours: number;
     ready_at: string;

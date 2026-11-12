@@ -13,15 +13,18 @@ from sklearn.dummy import DummyRegressor
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, roc_auc_score
 
+from .data import MAX_WAVE_HEIGHT_M, estimate_wave_height_m
+
 
 _NOW = "2026-11-12T08:00:00Z"
-_VERSION = "gbm-demo-v2"
+_VERSION = "gbm-demo-v3"
 _FEATURES = (
     "queue_hours", "wind_mps", "precipitation_mm", "observed_delay_hours",
-    "mass_tonnes",
+    "mass_tonnes", "wave_height_m",
 )
-# More queue, wind, rain or known delay never lowers the forecast; mass is free.
-_MONOTONIC = (1, 1, 1, 1, 0)
+# More queue, wind, rain, known delay or wave height never lowers the forecast;
+# mass is free.
+_MONOTONIC = (1, 1, 1, 1, 0, 1)
 # hours_to_cutoff is not a delay driver: it is used only to score miss labels.
 _HISTORY_NUMBERS = _FEATURES + ("hours_to_cutoff",)
 _MIN_LEAF = 10
@@ -56,6 +59,16 @@ def _number(value: object, name: str, *, signed: bool = False) -> float:
         return result
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"Invalid {name}") from exc
+
+
+def _wave(value: object, wind: object) -> float:
+    """Wave height in metres; None falls back to the documented wind estimate."""
+    if value is None:
+        return estimate_wave_height_m(_number(wind, "wind_mps"))
+    result = _number(value, "wave_height_m")
+    if result > MAX_WAVE_HEIGHT_M:
+        raise ValueError("Invalid wave_height_m")
+    return result
 
 
 def _fit(x: np.ndarray, y: np.ndarray, seed: int) -> object:
@@ -107,8 +120,13 @@ def train_model(history: list[dict], seed: int = 42) -> tuple[object, dict]:
             observed = _timestamp(row["observed_at"], "observed_at")
             if observed >= _timestamp(_NOW, "simulation_now"):
                 raise ValueError("History must precede simulation_now")
-            numbers = [_number(row[key], key, signed=key == "hours_to_cutoff")
-                       for key in _HISTORY_NUMBERS]
+            # Older history without a sea-state column falls back to the wind estimate.
+            wave = row.get("wave_height_m")
+            numbers = [
+                _wave(wave, row["wind_mps"]) if key == "wave_height_m"
+                else _number(row[key], key, signed=key == "hours_to_cutoff")
+                for key in _HISTORY_NUMBERS
+            ]
             if numbers[4] <= 0:
                 raise ValueError("mass_tonnes must be positive")
             target = _number(row["delay_hours"], "delay_hours")
@@ -177,6 +195,11 @@ def predict(model: object, shipment: dict, weather: dict,
         override = scenario.get("wind_mps")
         wind = _number(weather["wind_mps"] if override is None else override, "wind_mps")
         rain = _number(weather["precipitation_mm"], "precipitation_mm")
+        # Scenario wave override, else the weather observation; a wind-only override
+        # makes the observed sea state stale, so it is re-estimated from that wind.
+        wave_override = scenario.get("wave_height_m")
+        wave_source = weather.get("wave_height_m") if override is None else None
+        wave = _wave(wave_override if wave_override is not None else wave_source, wind)
         mass = _number(shipment["mass_kg"], "mass_kg") / 1000
         if mass <= 0:
             raise ValueError("mass_kg must be positive")
@@ -192,7 +215,7 @@ def predict(model: object, shipment: dict, weather: dict,
         raise ValueError("Malformed prediction inputs") from exc
     except OverflowError as exc:
         raise ValueError("Baseline readiness exceeds supported timestamp range") from exc
-    features = np.asarray([[queue + queue_extra, wind, rain, observed + arrival_extra, mass]])
+    features = np.asarray([[queue + queue_extra, wind, rain, observed + arrival_extra, mass, wave]])
     delay = float(_delays(model.regressor, features)[0])
     try:
         processing_ready = known_ready + timedelta(hours=delay)
@@ -210,6 +233,10 @@ def predict(model: object, shipment: dict, weather: dict,
         "High wind" if wind >= 15 else "Moderate wind" if wind >= 8 else "Low wind",
         "Long terminal queue" if queue + queue_extra >= 3 else "Short terminal queue",
     ]
+    if wave >= 3:
+        factors.append("High sea state")
+    elif wave >= 1.5:
+        factors.append("Moderate sea state")
     if rain > 0:
         factors.append("Precipitation present")
     if observed + arrival_extra > 0:

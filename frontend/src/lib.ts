@@ -91,6 +91,8 @@ export const translations: Record<string, string> = {
   "High wind": "Сильный ветер",
   "Moderate wind": "Умеренный ветер",
   "Low wind": "Слабый ветер",
+  "High sea state": "Сильное волнение",
+  "Moderate sea state": "Умеренное волнение",
   "Long terminal queue": "Большая очередь в терминале",
   "Short terminal queue": "Небольшая очередь в терминале",
   "Precipitation present": "Есть осадки",

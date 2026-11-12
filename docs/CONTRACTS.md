@@ -45,6 +45,7 @@ Use plausible illustrative durations/distances/costs; never claim real service a
 History: at least 600 independent shipment rows over 90 days strictly before simulation_now,
 sorted by `observed_at`, one row per shipment (no grouping leakage). Exact row keys:
 `shipment_id: str`, `observed_at: str`, `queue_hours: float`, `wind_mps: float`,
+`wave_height_m: float` (seeded, correlated with wind; penalises delay above ~1.7 m),
 `precipitation_mm: float`, `observed_delay_hours: float`, `mass_tonnes: float`,
 `hours_to_cutoff: float`, `delay_hours: float`, `missed_connection: int` (0/1).
 First seven numeric fields except labels are known at prediction time. `delay_hours` is
@@ -64,16 +65,20 @@ def predict(model: object, shipment: dict, weather: dict,
 ```
 
 Chronological first 80% train / last 20% test, no shuffle. One monotonic
-HistGradientBoosting regressor (non-decreasing in queue, wind, precipitation and known
-delay; mean fallback below 20 training rows). There is no separate classifier.
+HistGradientBoosting regressor (non-decreasing in queue, wind, precipitation, known
+delay and wave height; mean fallback below 20 training rows). There is no separate classifier.
 Train-only median delay baseline, MAE both; ROC AUC of `miss_probability` against holdout
 `missed_connection` if the test set has both classes, else null. No future actual
 timestamps as features. Feature order is queue_hours, wind_mps, precipitation_mm,
-observed_delay_hours, mass_tonnes. `hours_to_cutoff` stays in history (remaining slack
+observed_delay_hours, mass_tonnes, wave_height_m (history rows lacking it fall
+back to the wind estimate). `hours_to_cutoff` stays in history (remaining slack
 beyond baseline arrival plus one hour handling) but only scores holdout labels; it is not
 a delay driver. The synthetic generator labels observed_delay + queue + additional_delay >
 slack as missed; equality is accepted, matching scheduling readiness <= cutoff.
-Scenario arrival delay augments observed_delay; queue_extra augments queue; wind override applies.
+Scenario arrival delay augments observed_delay; queue_extra augments queue; wind override applies; a scenario
+`wave_height_m` override applies, else weather wave height, else (also after a wind-only override)
+`estimate_wave_height_m(wind)` = min(8, 0.2 + 0.009*wind^2) m. Factors: "High sea state"
+(>= 3 m), "Moderate sea state" (>= 1.5 m).
 `delay_hours` is predicted additional delay; readiness formula:
 `max(planned_port_arrival + observed_delay + scenario.arrival_delay + queue_hours
 + scenario.queue_extra + 1 hour handling + delay_hours, documents_ready_at)`.
@@ -106,10 +111,10 @@ def compute_routes(shipment: dict, ports: list[dict], services: list[dict],
 def calculate_emissions(legs: list[dict], mass_kg: float) -> dict: ... # Emissions
 ```
 
-Profiles: none all zero; storm arrival_delay_hours=3, queue_extra_hours=2, wind_mps=22;
+Profiles: none all zero; storm arrival_delay_hours=3, queue_extra_hours=2, wind_mps=22, wave_height_m=4.5;
 congestion arrival_delay_hours=0, queue_extra_hours=6; closure blocks `sea-main` only.
 Storm is local Makhachkala disruption, NOT a claim all Caspian ports remain safe in storms.
-Other wind values null. Pure functions; do not mutate inputs. NetworkX directed graph
+Other wind and wave_height_m values null. Pure functions; do not mutate inputs. NetworkX directed graph
 enumerates small simple paths, scheduler selects departures >= readiness+handling before cutoff.
 Start at current_location_id at prediction.ready_at (initial handling already counted);
 for subsequent edges add the NEXT service's handling_hours to preceding arrival before cutoff.
@@ -242,11 +247,11 @@ Routes here cover remaining legs only. Frontend must not hardcode these numeric 
       "planned_at":"2026-11-12T10:00:00Z","estimated_at":"2026-11-12T10:30:00Z",
       "actual_at":null,"source":"synthetic","received_at":"2026-11-12T08:00:00Z","quality_flag":"forecast"}]
   },
-  "weather":{"wind_mps":6,"precipitation_mm":0,"wave_height_m":null,"source":"synthetic",
+  "weather":{"wind_mps":6,"precipitation_mm":0,"wave_height_m":0.5,"source":"synthetic",
     "observed_at":"2026-11-12T08:00:00Z","stale":false},
-  "scenario":{"kind":"none","arrival_delay_hours":0,"queue_extra_hours":0,"wind_mps":null,"blocked_service_ids":[]},
+  "scenario":{"kind":"none","arrival_delay_hours":0,"queue_extra_hours":0,"wind_mps":null,"wave_height_m":null,"blocked_service_ids":[]},
   "prediction":{"delay_hours":0.5,"ready_at":"2026-11-12T12:00:00Z","miss_probability":0.12,
-    "risk":"low","factors":["Low wind","Short terminal queue"],"model_version":"gbm-demo-v2","data_source":"synthetic"},
+    "risk":"low","factors":["Low wind","Short terminal queue"],"model_version":"gbm-demo-v3","data_source":"synthetic"},
   "current_route":{
     "id":"sea-main@2026-11-12T18:00:00Z+road-final@2026-11-14T00:00:00Z",
     "label":"Planned Caspian crossing","feasible":true,"reason":null,"missed_connection":false,

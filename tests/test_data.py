@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import statistics
 import sys
 from datetime import datetime, timedelta, timezone
@@ -16,7 +17,12 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app import data as data_module  # noqa: E402
-from app.data import get_weather, load_demo_data  # noqa: E402
+from app.data import (  # noqa: E402
+    _delay_hours,
+    estimate_wave_height_m,
+    get_weather,
+    load_demo_data,
+)
 from app.schemas import (  # noqa: E402
     SIMULATION_NOW,
     Port,
@@ -30,6 +36,7 @@ HISTORY_KEYS = {
     "observed_at",
     "queue_hours",
     "wind_mps",
+    "wave_height_m",
     "precipitation_mm",
     "observed_delay_hours",
     "mass_tonnes",
@@ -250,6 +257,7 @@ def test_history_rows_are_independent_chronological_and_in_window(demo: dict) ->
         for field in (
             "queue_hours",
             "wind_mps",
+            "wave_height_m",
             "precipitation_mm",
             "observed_delay_hours",
             "mass_tonnes",
@@ -334,7 +342,9 @@ def test_synthetic_weather_is_deterministic_and_schema_valid(demo: dict) -> None
         assert first["stale"] is False
         assert first["wind_mps"] >= 0
         assert first["precipitation_mm"] >= 0
-        assert first["wave_height_m"] is None
+        assert 0 <= first["wave_height_m"] <= 1.0  # calm demo sea state
+        if first["wind_mps"] > 0:
+            assert first["wave_height_m"] <= estimate_wave_height_m(first["wind_mps"]) + 0.3
 
     with pytest.raises(KeyError):
         get_weather("unknown-port")
@@ -713,3 +723,28 @@ def test_cache_write_failure_cleans_up_temp_file(
     assert weather["source"] == "open-meteo"  # caching stays best-effort
     assert cache_path.read_text(encoding="utf-8") == "previous"
     assert [p.name for p in tmp_path.iterdir()] == ["weather-cache.json"]
+
+
+def test_history_wave_height_correlates_with_wind_and_is_deterministic() -> None:
+    history = load_demo_data()["history"]
+    assert history == load_demo_data()["history"]
+    waves = [row["wave_height_m"] for row in history]
+    assert all(0 < w <= 40 for w in waves)
+    calm = [r["wave_height_m"] for r in history if r["wind_mps"] < 9]
+    stormy = [r["wave_height_m"] for r in history if r["wind_mps"] >= 18]
+    assert statistics.median(calm) < 1.0
+    assert statistics.median(stormy) > 3.0
+    # Sea state adds delay beyond wind: same row, higher waves -> longer delay.
+    base = dict(is_storm=False, queue_hours=2.0, wind_mps=12.0, precipitation_mm=0.0,
+                observed_delay_hours=0.0, mass_tonnes=20.0)
+    low = _delay_hours(**base, wave_height_m=1.0, rng=random.Random(1))
+    high = _delay_hours(**base, wave_height_m=4.0, rng=random.Random(1))
+    assert high > low + 1.0
+
+
+def test_wave_estimate_is_monotonic_and_bounded() -> None:
+    values = [estimate_wave_height_m(w) for w in range(0, 41)]
+    assert values == sorted(values)
+    assert 0.2 <= estimate_wave_height_m(0) and max(values) <= 8.0
+    assert 0.3 <= estimate_wave_height_m(4) <= 0.8
+    assert 3.0 <= estimate_wave_height_m(22) <= 5.0
