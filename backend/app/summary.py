@@ -12,7 +12,11 @@ CO2e approximation: history rows carry no route, so their emissions are
 ``mass_tonnes * intensity``, where ``intensity`` (kg CO2e per tonne) is the
 mass-weighted average of the current routes: ``sum(route CO2e) / sum(shipment
 tonnes)``. Route CO2e itself uses the ``esg.py`` factors (demo-v1, transport-only,
-remaining legs). The history is therefore valued as if it had travelled the current
+remaining legs). Unavailable routes with no legs are excluded from both sums:
+their emissions are unknown, not a zero-emission shipment. Scheduled recovery
+routes still contribute even when their original connection was missed. With no
+scheduled routes the numeric demo estimate falls back to zero.
+The history is therefore valued as if it had travelled the current
 mix of corridors; it is an illustration, not a measurement.
 """
 from datetime import datetime, timedelta
@@ -29,7 +33,9 @@ METHODOLOGY = (
     "Периоды считаются неделями назад от SIMULATION_NOW. Дельта сравнивается с предыдущим "
     "равным периодом; если история его не покрывает, дельта не показывается. "
     "Вовремя = без пропущенной стыковки. CO2e истории = масса × средняя интенсивность "
-    f"текущих маршрутов (факторы esg.py, {esg.FACTOR_VERSION}). Доли видов транспорта "
+    f"текущих маршрутов с известными участками (факторы esg.py, {esg.FACTOR_VERSION}). "
+    "Недоступные маршруты без участков исключены из расчёта интенсивности; "
+    "если участков нет ни у одного маршрута, оценка равна нулю (нет данных). Доли видов транспорта "
     "считаются по т·км текущих маршрутов."
 )
 DISCLAIMER = "Синтетическая история, не операционные данные. " + esg.DISCLAIMER
@@ -57,8 +63,9 @@ def _stats(rows: list[tuple[datetime, dict]]) -> dict[str, float]:
 
 
 def _intensity(details: list[ShipmentDetail]) -> float:
-    tonnes = sum(d.shipment.mass_kg for d in details) / 1000
-    co2 = sum(d.current_route.co2_kg for d in details)
+    scheduled = [d for d in details if d.current_route.legs]
+    tonnes = sum(d.shipment.mass_kg for d in scheduled) / 1000
+    co2 = sum(d.current_route.co2_kg for d in scheduled)
     return co2 / tonnes if tonnes > 0 else 0.0
 
 

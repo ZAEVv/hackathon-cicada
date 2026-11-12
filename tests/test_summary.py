@@ -122,3 +122,39 @@ def test_mode_split_sums_to_100(client):
 def test_all_numbers_finite(client):
     for weeks in (4, 13):
         assert all(math.isfinite(n) for n in numbers(get(client, weeks)))
+
+
+def test_closure_does_not_treat_unknown_route_as_zero_emission_cargo(client):
+    path = "/api/shipments/SCT-001/scenario"
+    try:
+        response = client.post(path, json={"kind": "closure"}, headers=BROKER)
+        assert response.status_code == 200
+        assert response.json()["current_route"]["legs"] == []
+        details = client.get("/api/dashboard", headers=BROKER).json()["shipments"]
+        scheduled = [d for d in details if d["current_route"]["legs"]]
+        # Missed transfers still have a scheduled recovery with real distances.
+        assert any(d["current_route"]["missed_connection"] for d in scheduled)
+        expected = sum(d["current_route"]["co2_kg"] for d in scheduled) / sum(
+            d["shipment"]["mass_kg"] / 1000 for d in scheduled)
+        body = get(client)
+        assert body["co2e_intensity_kg_per_tonne"] == pytest.approx(expected)
+        assert body["kpis"]["co2e_tonnes"]["value"] == pytest.approx(
+            sum(w["tonnes"] for w in body["weekly"]) * expected / 1000)
+    finally:
+        client.post(path + "/reset", headers=BROKER)
+
+
+def test_intensity_without_scheduled_routes_is_finite(client):
+    from backend.app.schemas import ShipmentDetail
+    from backend.app.summary import _intensity
+
+    path = "/api/shipments/SCT-001/scenario"
+    try:
+        response = client.post(path, json={"kind": "closure"}, headers=BROKER)
+        assert response.status_code == 200
+        unavailable = ShipmentDetail.model_validate(response.json())
+        assert not unavailable.current_route.legs
+        assert _intensity([unavailable]) == 0.0
+        assert _intensity([]) == 0.0
+    finally:
+        client.post(path + "/reset", headers=BROKER)
