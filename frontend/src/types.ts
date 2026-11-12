@@ -192,6 +192,7 @@ export type HubForecast = {
   hubs: HubSeries[];
   bottlenecks: BottleneckWindow[];
   background_source: string;
+  disclaimer: string;
 };
 
 export type SummaryKpi = {

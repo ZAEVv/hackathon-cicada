@@ -350,6 +350,7 @@ class HubForecast(Contract):
     hubs: list[HubSeries]
     bottlenecks: list[BottleneckWindow]
     background_source: str
+    disclaimer: str
 
 
 # --- Corridor summary (GET /api/summary) -------------------------------------
