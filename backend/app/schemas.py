@@ -350,4 +350,55 @@ class HubForecast(Contract):
     hubs: list[HubSeries]
     bottlenecks: list[BottleneckWindow]
     background_source: str
+
+
+# --- Corridor summary (GET /api/summary) -------------------------------------
+class SummaryKpi(Contract):
+    value: float
+    previous: float | None = None  # None: the previous equal period is not covered by the history
+    delta: float | None = None  # value - previous, in the KPI's own unit
+    delta_pct: float | None = None  # relative change in percent; None when previous is 0/unknown
+
+
+class SummaryWeek(Contract):
+    week_start: str  # UTC date (YYYY-MM-DD) of the first day of the 7-day bin
+    shipments: int
+    tonnes: float
+
+
+class SummaryModeShare(Contract):
+    mode: Mode
+    tonne_km: float
+    share_pct: float
+
+
+class SummaryShipment(Contract):
+    id: str
+    origin_id: str
+    origin_name: str
+    destination_id: str
+    destination_name: str
+    mass_tonnes: float
+    status: Literal["at_risk", "docs_pending", "attention", "in_transit"]
+
+
+class SummaryKpis(Contract):
+    shipments: SummaryKpi
+    on_time_pct: SummaryKpi
+    avg_delay_hours: SummaryKpi
+    co2e_tonnes: SummaryKpi
+
+
+class CorridorSummary(Contract):
+    simulation_now: str = SIMULATION_NOW
+    synthetic: bool = True
+    weeks: Literal[4, 13]
+    period_start: str
+    period_end: str
+    weekly: list[SummaryWeek]
+    kpis: SummaryKpis
+    mode_split: list[SummaryModeShare]
+    recent_shipments: list[SummaryShipment]
+    co2e_intensity_kg_per_tonne: float
+    methodology: str
     disclaimer: str

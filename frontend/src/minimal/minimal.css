@@ -308,3 +308,50 @@
     font-size: 22px;
   }
 }
+
+/* Summary states: neutral delta, bad badge, caption, skeleton, error. */
+.md-delta.flat {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.md-badge.bad {
+  color: var(--negative);
+  border-color: var(--negative);
+}
+.md-caption {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.md-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--negative);
+}
+.md-error button {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.md-skel {
+  display: block;
+  border-radius: 6px;
+  background: var(--track);
+  animation: md-pulse 1.2s ease-in-out infinite;
+}
+@keyframes md-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .md-skel {
+    animation: none;
+  }
+}

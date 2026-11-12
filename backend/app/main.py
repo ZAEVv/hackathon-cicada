@@ -7,7 +7,7 @@ import hmac
 import logging
 import os
 from threading import RLock
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
@@ -15,9 +15,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from . import data, hubs, preclearance, predictive, routing, security
+from . import data, hubs, preclearance, predictive, routing, security, summary
 from .schemas import (
-    SIMULATION_NOW, AuditEntry, AuditVerification, ChooseRouteRequest,
+    SIMULATION_NOW, CorridorSummary, AuditEntry, AuditVerification, ChooseRouteRequest,
     Dashboard, Declaration, DeclarationInput, IdempotencyKey, ModelMetrics,
     ReviewRequest, ScenarioRequest, ShipmentDetail, ShipmentId,
 )
@@ -249,6 +249,14 @@ def create_app(db_path: str | None = None) -> FastAPI:
             return Dashboard(shipments=details, summary={"total": len(details),
                 "high_risk": sum(d.prediction.risk == "high" or d.current_route.missed_connection for d in details),
                 "co2_kg": sum(d.current_route.co2_kg for d in details)})
+
+    @app.get("/api/summary", response_model=CorridorSummary, dependencies=authenticated)
+    def corridor_summary(weeks: Literal["4", "13"] = "4"):
+        # Other values hit the 422 handler above, which never echoes the input.
+        with lock:
+            details = [detail(sid) for sid in app.state.shipments]
+        return summary.build_summary(app.state.catalog["history"], details,
+                                     app.state.catalog["ports"], int(weeks))
 
     @app.get("/api/shipments/{shipment_id}", response_model=ShipmentDetail, dependencies=authenticated)
     def get_detail(shipment_id: ShipmentId):
