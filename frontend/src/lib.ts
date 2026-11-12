@@ -113,6 +113,18 @@ export const translations: Record<string, string> = {
     "Плановый маршрут недоступен в текущих условиях.",
   "Planned connection missed; showing earliest recovery.":
     "Плановая стыковка пропущена; показан ближайший вариант восстановления.",
+  "Background peak load": "Суточный пик фоновой загрузки",
+  "Storm limits berth operations": "Шторм ограничивает работу причалов",
+  "Scenario congestion at terminal": "Очередь в терминале по сценарию",
+  "Sea service closed: cargo accumulates":
+    "Морская линия закрыта: груз накапливается",
+  "Diverted flow from closed service":
+    "Переток грузопотока с закрытой линии",
+  "Demo shipments handled in this window":
+    "В окне обрабатываются демо-перевозки",
+  "Shipment held: route unavailable":
+    "Груз задержан: маршрут недоступен",
+  "Backlog carried over": "Накопленная очередь обработки",
   rail_departure: "Отправление по железной дороге",
   port_arrival: "Прибытие в порт",
   sea_departure: "Морское отправление",

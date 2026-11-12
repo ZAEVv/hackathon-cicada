@@ -9,6 +9,7 @@ import {
   Clock3,
   CloudSun,
   Container,
+  Gauge,
   Leaf,
   Map as MapIcon,
   RefreshCw,
@@ -39,6 +40,7 @@ import { CountUp, Ring } from "../motion";
 import { reducedMotion } from "../theme";
 import { LegGantt, modeIcon } from "./LegGantt";
 import { RouteMap } from "./RouteMap";
+import { HubPanel, HubTimeBar, loadAt, useHubForecast } from "./HubPanel";
 
 const SCENARIOS = [
   { kind: "none", Icon: Activity, tone: "green" },
@@ -65,6 +67,7 @@ export function Overview({
   name,
   short,
   riskPing,
+  token,
   onSelect,
   onRefresh,
   onScenario,
@@ -80,6 +83,7 @@ export function Overview({
   name: (id: string) => string;
   short: (id: string) => string;
   riskPing: number;
+  token: string;
   onSelect: (id: string) => void;
   onRefresh: () => void;
   onScenario: (kind: string) => void;
@@ -92,6 +96,9 @@ export function Overview({
   const [sort, setSort] = useState<Sort>("id");
   const [showAlts, setShowAlts] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
+  const [showLoad, setShowLoad] = useState(true);
+  const [hubHour, setHubHour] = useState(0);
+  const hub = useHubForecast(token, selected, dashboard);
   const listRef = useRef<HTMLDivElement>(null);
 
   // The bell in the top bar asks for the risky shipments first.
@@ -448,6 +455,14 @@ export function Overview({
               >
                 <Tag size={16} /> Подписи
               </button>
+              <button
+                type="button"
+                className={"tool" + (showLoad ? " on" : "")}
+                aria-pressed={showLoad}
+                onClick={() => setShowLoad((v) => !v)}
+              >
+                <Gauge size={16} /> Загрузка узлов
+              </button>
             </div>
           </div>
           <div className="tool-group">
@@ -462,6 +477,13 @@ export function Overview({
 
         {d && r ? (
           <>
+            {showLoad && hub.forecast && (
+              <HubTimeBar
+                forecast={hub.forecast}
+                hour={hubHour}
+                onHour={setHubHour}
+              />
+            )}
             <div className="map-stage reveal" style={order(2)}>
               <RouteMap
                 ports={ports}
@@ -470,6 +492,8 @@ export function Overview({
                 current={d.shipment.current_location_id}
                 showAlternatives={showAlts}
                 showLabels={showLabels}
+                load={showLoad ? loadAt(hub.forecast, hubHour) : null}
+                loadLevels={hub.forecast}
               />
               <div className="map-legend">
                 <span>
@@ -483,6 +507,13 @@ export function Overview({
                 <span>
                   <i className="lg-dot" /> Груз сейчас
                 </span>
+                {showLoad && hub.forecast && (
+                  <span className="lg-load">
+                    Загрузка: <i className="hub-low" /> норма
+                    <i className="hub-medium" /> высокая
+                    <i className="hub-high" /> узкое место
+                  </span>
+                )}
               </div>
               <div className="map-badge">
                 <Ship size={16} />{" "}
@@ -512,6 +543,19 @@ export function Overview({
                 short={short}
               />
             </div>
+
+            <HubPanel
+              forecast={hub.forecast}
+              error={hub.error}
+              hour={hubHour}
+              name={name}
+              short={short}
+              onHour={(h) => {
+                setShowLoad(true);
+                setHubHour(h);
+              }}
+              onSelect={onSelect}
+            />
 
             <section
               className="card timeline-card reveal"

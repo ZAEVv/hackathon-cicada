@@ -465,6 +465,7 @@ function App() {
                 name={name}
                 short={short}
                 riskPing={riskPing}
+                token={authToken}
                 onSelect={switchShipment}
                 onRefresh={() => refresh().catch((e) => setError(e.message))}
                 onScenario={(kind) => mutate("/scenario", post({ kind }))}

@@ -1,6 +1,14 @@
 import type React from "react";
-import type { Leg, Port, Route } from "../types";
-import { date, lookup, portKinds, portName, portShortName } from "../lib";
+import type { HubPoint, Leg, Port, Route } from "../types";
+import {
+  date,
+  fmt,
+  hours,
+  lookup,
+  portKinds,
+  portName,
+  portShortName,
+} from "../lib";
 import { useSize } from "../motion";
 import { reducedMotion } from "../theme";
 
@@ -113,6 +121,8 @@ export function RouteMap({
   current,
   showAlternatives,
   showLabels,
+  load = null,
+  loadLevels = null,
 }: {
   ports: Port[];
   route: Route;
@@ -120,6 +130,9 @@ export function RouteMap({
   current: string;
   showAlternatives: boolean;
   showLabels: boolean;
+  // Hub load at the chosen hour, keyed by port id (null: layer off).
+  load?: Map<string, HubPoint> | null;
+  loadLevels?: { bottleneck_threshold: number; busy_threshold: number } | null;
 }) {
   const [ref, { w, h }] = useSize<HTMLDivElement>();
   const valid = ports.filter(
@@ -190,6 +203,12 @@ export function RouteMap({
     )
       parallels.push(lat);
   }
+  const loadTone = (utilization: number) =>
+    utilization >= (loadLevels?.bottleneck_threshold ?? 0.85)
+      ? "high"
+      : utilization >= (loadLevels?.busy_threshold ?? 0.7)
+        ? "medium"
+        : "low";
   const onRoute = new Set(
     route.legs.flatMap((l) => [l.origin_id, l.destination_id]),
   );
@@ -263,6 +282,35 @@ export function RouteMap({
                 </text>
               </g>
             )}
+            {load && (
+              // Plain fills and strokes only: no filters on the map (repaint trails).
+              <g className="map-load">
+                {valid.map((port) => {
+                  const point = load.get(port.id);
+                  if (!point) return null;
+                  const p = at(port.lon, port.lat);
+                  const share = Math.min(1, point.utilization);
+                  const size = 13 + 13 * Math.sqrt(Math.min(1, point.load_tph / 60));
+                  const ring = 2 * Math.PI * size;
+                  return (
+                    <g
+                      key={port.id}
+                      className={"hub-" + loadTone(point.utilization)}
+                    >
+                      <circle className="load-halo" cx={p.x} cy={p.y} r={size} />
+                      <circle
+                        className="load-ring"
+                        cx={p.x}
+                        cy={p.y}
+                        r={size}
+                        strokeDasharray={`${f(ring * share)} ${f(ring)}`}
+                        transform={`rotate(-90 ${f(p.x)} ${f(p.y)})`}
+                      />
+                    </g>
+                  );
+                })}
+              </g>
+            )}
             {showAlternatives &&
               alternatives.map((alt, k) => (
                 <g
@@ -325,6 +373,10 @@ export function RouteMap({
             );
             const tipSide =
               p.x < 120 ? " tip-start" : p.x > w - 120 ? " tip-end" : "";
+            const hub = load?.get(port.id);
+            const hubText = hub
+              ? `Загрузка ${fmt(Math.round(hub.utilization * 100))}% · ожидание ${hours(hub.queue_hours)}`
+              : "";
             return (
               <button
                 type="button"
@@ -340,7 +392,7 @@ export function RouteMap({
                 style={
                   { left: p.x, top: p.y, "--i": i } as React.CSSProperties
                 }
-                aria-label={`${portName(port)}${isCurrent ? ", груз сейчас здесь" : ""}`}
+                aria-label={`${portName(port)}${isCurrent ? ", груз сейчас здесь" : ""}${hubText ? ", " + hubText : ""}`}
               >
                 <span className="mk-dot" />
                 {showLabels && (
@@ -357,6 +409,13 @@ export function RouteMap({
                   {arrives && <small>Прибытие: {date(arrives.arrival_at)}</small>}
                   {departs && (
                     <small>Отправление: {date(departs.departure_at)}</small>
+                  )}
+                  {hub && (
+                    <small className={"mk-load hub-" + loadTone(hub.utilization)}>
+                      {hubText}
+                      <br />
+                      на {date(hub.at)} · синтетика
+                    </small>
                   )}
                 </span>
               </button>
