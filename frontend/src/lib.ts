@@ -139,6 +139,70 @@ export const translations: Record<string, string> = {
   sea_departure: "Морское отправление",
   road_departure: "Отправление автотранспортом",
   delivery: "Доставка",
+  // Document validation issue messages (preclearance._validate).
+  "Field must not be blank": "Поле не должно быть пустым",
+  "Use a two-letter country code": "Укажите двухбуквенный код страны",
+  "Use 6–10 digits": "Укажите от 6 до 10 цифр",
+  "Missing invoice": "Нет инвойса",
+  "Missing packing_list": "Нет упаковочного листа",
+  "Missing transport": "Нет транспортного документа",
+  "Duplicate invoice": "Инвойс указан дважды",
+  "Duplicate packing_list": "Упаковочный лист указан дважды",
+  "Duplicate transport": "Транспортный документ указан дважды",
+  "Container differs from shipment": "Контейнер не совпадает с перевозкой",
+  "Container IDs must match": "Номера контейнеров должны совпадать",
+  "All masses must be within 1 kg": "Все массы должны совпадать с точностью до 1 кг",
+  // Smart-contract rule results (preclearance._RULES).
+  OK: "Выполнено",
+  "Documents are inconsistent": "Документы не согласованы",
+  "HS code requires manual control": "Код ТН ВЭД требует ручного контроля",
+  "Value per kg is outside the plausible band":
+    "Стоимость за кг вне допустимого диапазона",
+  "Shipper is not a trusted trader": "Отправитель не в списке доверенных",
+  "Origin country is not on the allowed list":
+    "Страна происхождения не в списке разрешённых",
+  // 403/404/409 details the API returns (shown in error toasts).
+  "Valid demo bearer token required": "Нужен действующий демо-токен доступа",
+  "Broker role required": "Требуется роль логиста",
+  "broker role required": "Требуется роль логиста",
+  "reviewer role required": "Требуется роль проверяющего",
+  "Shipment not found": "Перевозка не найдена",
+  "Not found": "Не найдено",
+  "Route is no longer feasible; refresh alternatives":
+    "Маршрут больше недоступен; обновите альтернативы",
+  "Submitted declaration must be reviewed before editing":
+    "Отправленную декларацию нельзя менять до решения проверяющего",
+  "Save a draft before validating": "Сначала сохраните черновик",
+  "Declaration must be ready": "Декларация должна быть готова к отправке",
+  "Idempotency key conflicts with revised declaration":
+    "Ключ идемпотентности относится к прежней версии декларации",
+  "Idempotency key is required": "Нужен ключ идемпотентности",
+  "Idempotency key is too long": "Слишком длинный ключ идемпотентности",
+  "Only submitted declarations can be reviewed":
+    "Рассмотреть можно только отправленную декларацию",
+  "Invalid review decision": "Неверное решение проверки",
+  "Invalid review comment": "Неверный комментарий проверки",
+  "Review comment is too long": "Слишком длинный комментарий",
+  "Declaration payload is too large": "Слишком большая декларация",
+  "Declaration payload contains invalid text":
+    "Декларация содержит недопустимый текст",
+  "Revision limit reached for this declaration":
+    "Достигнут предел числа версий декларации",
+  "Audit limit reached for this declaration":
+    "Достигнут предел записей журнала декларации",
+  "Stored declaration is unreadable": "Сохранённая декларация повреждена",
+  "Stored audit trail is unreadable": "Журнал действий повреждён",
+  "Stored submission record is unreadable":
+    "Запись об отправке повреждена",
+  // Disclaimers returned by the API.
+  "Held-out synthetic history; not validated on real Caspian operations.":
+    "Отложенная синтетическая выборка; не проверено на реальных каспийских перевозках.",
+  "Hash-chain integrity only; not proof of authenticity or customs approval.":
+    "Проверяется только целостность хеш-цепочки; это не подтверждение подлинности и не таможенное решение.",
+  "Illustrative transport-only estimate; not ISO/GLEC certified.":
+    "Иллюстративная оценка только для перевозки; не сертифицирована по ISO/GLEC.",
+  "Synthetic forecast: seeded background load and demo capacities; not real port statistics.":
+    "Синтетический прогноз: сгенерированная фоновая загрузка и демо-мощности; не реальная статистика портов.",
 };
 export const translate = (value: string) => lookup(translations, value) ?? value;
 export const portName = (port: Port) => lookup(portNames, port.id) ?? port.name;

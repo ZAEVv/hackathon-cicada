@@ -33,7 +33,9 @@ SQLite лежит в томе `caspian-data` (сброс чистой БД: `doc
 
 Зависимости: `requirements.txt` — только runtime, `requirements-dev.txt` — плюс pytest/httpx
 для тестов (`dev.sh` ставит его). Локальные настройки: `cp .env.example .env`, см. «Безопасность».
-Автоматический сквозной сценарий при запущенном API: `.venv/bin/python scripts/demo.py`.
+Автоматический сквозной сценарий при запущенном API: `.venv/bin/python scripts/demo.py`
+(по умолчанию `http://127.0.0.1:8000`; для Docker — `--base-url http://127.0.0.1:5173` или
+`SCT_BASE_URL=...`). Печатает PASS/FAIL по каждой проверке, при ошибке код выхода ≠ 0.
 Пошаговый сценарий показа на 5–7 минут — `docs/DEMO.md`.
 
 ## Что делает прототип

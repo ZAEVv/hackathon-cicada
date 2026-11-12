@@ -38,9 +38,10 @@ Scenario design. Scenarios are stored per shipment, therefore:
      its sea-side capacity, so cargo accumulates there; part of its background
      flow shifts to the destinations of the remaining services from that node
      and the blocked service's destination receives less.
-   Storm and congestion are modelled locally at ``REGIONAL_NODE`` (Makhachkala)
-   with a fallback to the requested shipment's current node for catalogs
-   without it.
+   Storm and congestion are modelled locally at the requested shipment's
+   current node (Makhachkala for the western line, Aktau for the eastern
+   branch), falling back to ``REGIONAL_NODE`` when that node is not a catalog
+   port.
 
 Capacities and background levels are demo-scale parameters keyed by port id,
 with defaults by node kind for ids this module has never seen.
@@ -218,7 +219,9 @@ def _regional_effects(ports: list[dict], services: list[dict], scenario: dict,
     effects = {pid: {"capacity": [1.0] * len(hours), "demand": [1.0] * len(hours),
                      "extra_tph": [0.0] * len(hours), "wait": [0.0] * len(hours),
                      "shift": 0, "reasons": [[] for _ in hours]} for pid in port_ids}
-    node = REGIONAL_NODE if REGIONAL_NODE in effects else fallback_node
+    # The scenario is the requested shipment's, so it hits that shipment's node
+    # (Aktau for the eastern branch); REGIONAL_NODE only without a usable focus.
+    node = fallback_node if fallback_node in effects else REGIONAL_NODE
     queue_extra = float(scenario.get("queue_extra_hours") or 0)
     wind = scenario.get("wind_mps")
     if node in effects and wind is not None:

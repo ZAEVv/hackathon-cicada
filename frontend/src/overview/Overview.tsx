@@ -120,7 +120,7 @@ export function Overview({
 
   // Same rule the server uses for summary.high_risk.
   const isHigh = (s: Detail) =>
-    s.prediction.risk === "high" || s.current_route.missed_connection;
+    s.prediction.risk === "high" || !s.current_route.feasible;
   const high = shipments.filter(isHigh).length;
   const medium = shipments.filter(
     (s) => !isHigh(s) && s.prediction.risk === "medium",
@@ -213,7 +213,7 @@ export function Overview({
           </div>
           <p className="micro">
             Сценарии заменяют друг друга. Шторм моделируется локально у
-            Махачкалы.
+            текущего порта перевозки (Махачкала или Актау).
           </p>
         </section>
 
