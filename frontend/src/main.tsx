@@ -831,7 +831,7 @@ function App() {
               ))}
             {page === "minimal" && (
               <div className="content">
-                <MinimalDashboard />
+                <MinimalDashboard token={authToken} />
               </div>
             )}
             {page === "model" && (

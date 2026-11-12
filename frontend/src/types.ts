@@ -146,3 +146,41 @@ export type Verification = {
   first_invalid_sequence: number | null;
   disclaimer: string;
 };
+
+export type SummaryKpi = {
+  value: number;
+  previous: number | null;
+  delta: number | null;
+  delta_pct: number | null;
+};
+export type CorridorSummary = {
+  simulation_now: string;
+  synthetic: boolean;
+  weeks: 4 | 13;
+  period_start: string;
+  period_end: string;
+  weekly: { week_start: string; shipments: number; tonnes: number }[];
+  kpis: {
+    shipments: SummaryKpi;
+    on_time_pct: SummaryKpi;
+    avg_delay_hours: SummaryKpi;
+    co2e_tonnes: SummaryKpi;
+  };
+  mode_split: {
+    mode: "sea" | "road" | "rail";
+    tonne_km: number;
+    share_pct: number;
+  }[];
+  recent_shipments: {
+    id: string;
+    origin_id: string;
+    origin_name: string;
+    destination_id: string;
+    destination_name: string;
+    mass_tonnes: number;
+    status: "at_risk" | "docs_pending" | "attention" | "in_transit";
+  }[];
+  co2e_intensity_kg_per_tonne: number;
+  methodology: string;
+  disclaimer: string;
+};
