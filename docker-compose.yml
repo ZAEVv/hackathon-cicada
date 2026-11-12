@@ -1,0 +1,26 @@
+services:
+  app:
+    build: .
+    image: smart-caspian-transit
+    ports:
+      # Published on the host's loopback only, matching the project's threat model.
+      - "127.0.0.1:5173:5173"
+    environment:
+      # Pass through from the shell or a .env file next to this compose file (all optional).
+      DEMO_BROKER_TOKEN: ${DEMO_BROKER_TOKEN:-}
+      DEMO_REVIEWER_TOKEN: ${DEMO_REVIEWER_TOKEN:-}
+      DEMO_DISABLE_DEFAULT_TOKENS: ${DEMO_DISABLE_DEFAULT_TOKENS:-}
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-}
+      AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:-}
+    volumes:
+      - caspian-data:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  caspian-data:
