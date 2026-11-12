@@ -1,6 +1,7 @@
 import type React from "react";
 import type { HubPoint, Leg, Port, Route } from "../types";
 import {
+  countries,
   date,
   fmt,
   hours,
@@ -43,7 +44,8 @@ const SEA: [number, number][] = [
 const LANDS: [string, number, number][] = [
   ["Россия", 43.4, 46.0],
   ["Казахстан", 55.4, 45.4],
-  ["Туркменистан", 56.4, 39.6],
+  // South of the Turkmenbashi label at every map size.
+  ["Туркменистан", 56.4, 38.9],
   ["Азербайджан", 46.2, 40.2],
   ["Иран", 55.2, 35.7],
 ];
@@ -408,7 +410,8 @@ export function RouteMap({
                 <span className="mk-tip" role="tooltip">
                   <strong>{portName(port)}</strong>
                   <small>
-                    {lookup(portKinds, port.kind) ?? port.kind} · {port.country}
+                    {lookup(portKinds, port.kind) ?? port.kind} ·{" "}
+                    {lookup(countries, port.country) ?? port.country}
                   </small>
                   {isCurrent && <em>Груз сейчас здесь</em>}
                   {arrives && <small>Прибытие: {date(arrives.arrival_at)}</small>}

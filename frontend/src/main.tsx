@@ -34,6 +34,7 @@ import type {
   Dashboard,
   Declaration,
   Detail,
+  LedgerStatus,
   Metrics,
   Payload,
   Port,
@@ -47,8 +48,12 @@ import {
   api,
   date,
   docs,
+  fieldLabel,
   fmt,
   initialPayload,
+  ledgerNodeLabels,
+  ledgerStateLabels,
+  ledgerStatusNotes,
   loadToken,
   lookup,
   newIdempotencyKey,
@@ -148,6 +153,7 @@ function App() {
     [form, setForm] = useState<Payload | null>(null),
     [audit, setAudit] = useState<Audit[]>([]),
     [verification, setVerification] = useState<Verification | null>(null),
+    [ledgerView, setLedgerView] = useState<LedgerStatus | null>(null),
     [comment, setComment] = useState(""),
     [toast, setToast] = useState(""),
     [ruleset, setRuleset] = useState<Ruleset | null>(null);
@@ -195,12 +201,14 @@ function App() {
   };
   const switchShipment = (id: string) => {
     if (busy || id === selectedRef.current) return;
-    refreshVersion.current++;
+    // No refreshVersion bump: an in-flight refresh must still deliver its
+    // dashboard; its detail is dropped by the selectedRef check.
     selectedRef.current = id;
     setDetail(null);
     setForm(null);
     setAudit([]);
     setVerification(null);
+    setLedgerView(null);
     setSelected(id);
   };
   switchRef.current = switchShipment;
@@ -263,8 +271,9 @@ function App() {
         {},
         authToken,
       ),
+      loadLedger(selected),
     ])
-      .then(([d, a]) => {
+      .then(([d, a, l]) => {
         if (active && selectedRef.current === selected) {
           setDetail(d);
           // Keep unsaved edits when only the token changed (switchShipment
@@ -272,6 +281,7 @@ function App() {
           setForm((prev) => prev ?? (d.preclearance?.payload || initialPayload(d)));
           setAudit(a);
           setVerification(null);
+          setLedgerView(l);
         }
       })
       .catch((e) => {
@@ -358,14 +368,19 @@ function App() {
   // disabled buttons while a request is in flight.
   useEffect(() => {
     if (!busy) return;
+    const BUSY_TITLE = "Идёт запрос…";
     const titled: HTMLElement[] = [];
     document.querySelectorAll<HTMLButtonElement>("main button:disabled").forEach((b) => {
       if (!b.title) {
-        b.title = "Идёт запрос…";
+        b.title = BUSY_TITLE;
         titled.push(b);
       }
     });
-    return () => titled.forEach((b) => b.removeAttribute("title"));
+    // Only undo our own value: React may have set a real title meanwhile.
+    return () =>
+      titled.forEach((b) => {
+        if (b.title === BUSY_TITLE) b.removeAttribute("title");
+      });
   }, [busy]);
   const mutate = async (
     path: string,
@@ -400,6 +415,8 @@ function App() {
           ),
         );
         setVerification(null);
+        const l = await loadLedger(selected);
+        if (selectedRef.current === selected) setLedgerView(l);
       }
       await refresh(selected);
       const okMsg = TOAST_BY_PATH[path];
@@ -411,6 +428,13 @@ function App() {
       setBusy(false);
     }
   };
+  // Ledger status is supplementary: a failure never blocks the audit card.
+  const loadLedger = (id: string) =>
+    api<LedgerStatus>(
+      `/shipments/${encodeURIComponent(id)}/ledger`,
+      {},
+      authToken,
+    ).catch(() => null);
   const verify = async () => {
     const target = selected;
     try {
@@ -420,6 +444,8 @@ function App() {
         authToken,
       );
       if (selectedRef.current === target) setVerification(result);
+      const l = await loadLedger(target);
+      if (selectedRef.current === target) setLedgerView(l);
     } catch (e) {
       if (selectedRef.current === target) setError((e as Error).message);
     }
@@ -442,24 +468,6 @@ function App() {
   const atRisk = dashboard?.summary.high_risk ?? 0;
   return (
     <div className="app">
-      <svg
-        className="goo-defs"
-        width="0"
-        height="0"
-        aria-hidden="true"
-        focusable="false"
-      >
-        <defs>
-          <filter id="goo" colorInterpolationFilters="sRGB">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur" />
-            <feColorMatrix
-              in="blur"
-              mode="matrix"
-              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -8"
-            />
-          </filter>
-        </defs>
-      </svg>
       <aside className="rail">
         <div className="rail-logo" title="Smart Caspian Transit">
           <Logo />
@@ -481,7 +489,6 @@ function App() {
           }}
         >
           <span className="nav-goo" aria-hidden="true">
-            <i />
             <i />
           </span>
           {PAGES.map(({ id, label, title, Icon }) => (
@@ -539,7 +546,6 @@ function App() {
             onClick={toggleTheme}
           >
             <span className="tt-goo" aria-hidden="true">
-              <i />
               <i />
             </span>
             <Moon size={17} />
@@ -809,7 +815,7 @@ function App() {
                         </button>
                         <button
                           type="button"
-                          disabled={busy || !d.preclearance || d.preclearance.status === "submitted" || d.preclearance.status === "needs_revision" ||
+                          disabled={busy || !d.preclearance || ["submitted", "auto_accepted", "demo_accepted", "needs_revision"].includes(d.preclearance.status) ||
                             JSON.stringify(form) !== JSON.stringify(d.preclearance.payload)}
                           className="secondary"
                           onClick={() =>
@@ -868,7 +874,7 @@ function App() {
                           <strong>Замечания проверки</strong>
                           {d.preclearance.validation.issues.map((issue, i) => (
                             <p key={i}>
-                              {issue.field}: {translate(issue.message)} ({issue.code})
+                              {fieldLabel(issue.field, displayedForm.documents)}: {translate(issue.message)}
                             </p>
                           ))}
                         </div>
@@ -963,6 +969,51 @@ function App() {
                             </span>
                           </div>
                         )}
+                        {ledgerView && (
+                          <div
+                            className={`ledger-row ledger-${ledgerView.status}`}
+                          >
+                            <div className="ledger-summary">
+                              <ShieldCheck size={14} />
+                              <span>
+                                Распределённый реестр:{" "}
+                                {ledgerView.nodes_in_sync} из{" "}
+                                {ledgerView.nodes_total} узлов подтвердили ·
+                                кворум {ledgerView.quorum} из{" "}
+                                {ledgerView.nodes_total}
+                                {lookup(ledgerStatusNotes, ledgerView.status)
+                                  ? ` · ${lookup(ledgerStatusNotes, ledgerView.status)}`
+                                  : ""}
+                              </span>
+                            </div>
+                            <div className="ledger-nodes">
+                              {ledgerView.nodes.map((n) => (
+                                <span
+                                  key={n.node_id}
+                                  className={`ledger-chip ${n.state}`}
+                                  title={`${
+                                    lookup(ledgerStateLabels, n.state) ?? n.state
+                                  }${
+                                    n.last_sequence != null
+                                      ? ` · запись №${n.last_sequence}`
+                                      : ""
+                                  }${
+                                    n.head_hash
+                                      ? ` · ${shortHash(n.head_hash)}`
+                                      : ""
+                                  }`}
+                                >
+                                  <span className="ledger-dot" />
+                                  {lookup(ledgerNodeLabels, n.node_id) ?? n.label}
+                                </span>
+                              ))}
+                            </div>
+                            <p className="micro ledger-micro">
+                              Узлы моделируются в одном процессе; это прототип,
+                              не промышленный реестр.
+                            </p>
+                          </div>
+                        )}
                         <p className="micro">
                           Проверка хеш-цепочки не подтверждает подлинность или
                           решение таможни.
@@ -973,7 +1024,7 @@ function App() {
                               <span className="event-dot done" />
                               <div>
                                 <strong>
-                                  #{a.sequence} · {a.action}
+                                  #{a.sequence} · {translate(a.action)}
                                 </strong>
                                 <small>
                                   {a.actor} · {date(a.at)}
@@ -1193,7 +1244,8 @@ function ClearanceStepper({
   status?: string;
   dirty: boolean;
 }) {
-  const current = dirty
+  // needs_revision: the next step is saving a new draft version.
+  const current = dirty || status === "needs_revision"
     ? 0
     : status === "ready"
       ? 2

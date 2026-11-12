@@ -163,10 +163,6 @@ button:disabled {
 .tone-green-text {
   color: var(--green);
 }
-.goo-defs {
-  position: absolute;
-  pointer-events: none;
-}
 
 /* ------------------------------------------------------------------ */
 /* Shell: rail, top bar, stage                                         */
@@ -239,10 +235,8 @@ button:disabled {
 .rail-text {
   display: none;
 }
-/* Sliding indicator. It used to be two blobs fused by an SVG goo filter
-   (filter: url(#goo)), but browsers do not invalidate the blurred filter
-   output when the blobs move, which left smeared trails behind the thumb.
-   Now a single thumb, no filter; the trailing blob is hidden. */
+/* Sliding indicators (rail, theme toggle, segmented control) are a single
+   plain thumb: filters on moving elements leave repaint trails. */
 .nav-goo {
   position: absolute;
   inset: 0;
@@ -258,9 +252,6 @@ button:disabled {
   background: var(--card-3);
   transform: translateY(calc(var(--idx, 0) * 54px));
   transition: transform 0.5s var(--ease-spring);
-}
-.nav-goo i:last-child {
-  display: none;
 }
 
 .topbar {
@@ -382,9 +373,6 @@ button:disabled {
   border-radius: 50%;
   background: var(--card-3);
   transition: transform 0.55s var(--ease-spring);
-}
-.tt-goo i:last-child {
-  display: none;
 }
 .theme-toggle[aria-checked="true"] .tt-goo i {
   transform: translateX(42px);
@@ -827,7 +815,6 @@ button:disabled {
   justify-items: center;
   text-align: center;
 }
-
 /* ------------------------------------------------------------------ */
 /* Overview: three panels                                              */
 /* ------------------------------------------------------------------ */
@@ -854,6 +841,8 @@ button:disabled {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* The toolbar and hub bar adapt to the column, not the viewport. */
+  container: ov-center / inline-size;
 }
 /* Panels scroll; their sections keep their natural height. */
 .ov-left > *,
@@ -1053,9 +1042,6 @@ button:disabled {
   background: var(--card-3);
   transform: translateX(calc(var(--idx, 0) * 100%));
   transition: transform 0.5s var(--ease-spring);
-}
-.seg-goo i:last-child {
-  display: none;
 }
 .seg button {
   position: relative;
@@ -1339,6 +1325,7 @@ button:disabled {
 /* Centre toolbar */
 .tools {
   display: flex;
+  flex-wrap: wrap;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
@@ -1351,7 +1338,7 @@ button:disabled {
   border-right: 1px dashed var(--line-2);
 }
 .tool-group:last-child {
-  flex: 1;
+  flex: 1 1 150px;
   border-right: 0;
 }
 .tool-label {
@@ -1360,6 +1347,7 @@ button:disabled {
 }
 .tool-items {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 .tool {
@@ -1388,6 +1376,7 @@ button.tool:active {
   transform: scale(0.94);
 }
 .tool-text {
+  max-width: 100%;
   height: 32px;
   display: flex;
   align-items: center;
@@ -3090,7 +3079,7 @@ html.theme-liquid *:not(.tt-goo i) {
   outline: 2px solid var(--text);
   outline-offset: 1px;
 }
-.hub-cell:hover,
+.hoverable .hub-cell:hover,
 .hub-cell:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -3170,7 +3159,7 @@ html.theme-liquid *:not(.tt-goo i) {
 button.hub-ship {
   cursor: pointer;
 }
-button.hub-ship:hover,
+.hoverable button.hub-ship:hover,
 button.hub-ship:focus-visible {
   border-color: var(--accent);
   color: var(--accent);
@@ -3193,6 +3182,34 @@ button.hub-ship:focus-visible {
   .hub-heat-row {
     grid-template-columns: 72px minmax(0, 1fr) 40px;
     gap: 6px;
+  }
+}
+
+/* Narrow centre column (three-column layout at 1280-1440 px, phones):
+   layer toggles become icon-only (title + visible-to-AT name kept). */
+@container ov-center (max-width: 640px) {
+  .tool-group {
+    padding: 10px 14px;
+  }
+  .tool {
+    padding: 0 9px;
+  }
+  .tool-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .hub-bar {
+    flex-wrap: wrap;
+    padding: 10px 14px;
+  }
+  .hub-when {
+    flex: 1 1 100%;
+    min-width: 0;
+    text-align: left;
   }
 }
 
@@ -3368,6 +3385,85 @@ main.stage[aria-busy="true"] button:disabled {
 }
 @media (max-width: 720px) {
   .stepper {
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  /* Keep toasts above the bottom tab bar. */
+  .toast-area {
+    left: 16px;
+    right: 16px;
+    bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px);
+  }
+}
+
+/* Simulated witness ledger row (Documents → «Журнал действий») */
+.ledger-row {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--card-2);
+}
+.ledger-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.ledger-summary svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--green);
+}
+.ledger-not_anchored .ledger-summary svg,
+.ledger-no_quorum .ledger-summary svg,
+.ledger-disabled .ledger-summary svg {
+  color: var(--amber);
+}
+.ledger-conflict .ledger-summary svg {
+  color: var(--red);
+}
+.ledger-nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.ledger-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.ledger-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.ledger-chip.in_sync {
+  background: var(--green-soft);
+  border-color: color-mix(in srgb, var(--green) 32%, transparent);
+  color: var(--green);
+}
+.ledger-chip.behind {
+  background: var(--amber-soft);
+  border-color: color-mix(in srgb, var(--amber) 32%, transparent);
+  color: var(--amber);
+}
+.ledger-chip.diverged,
+.ledger-chip.invalid_signature {
+  background: var(--red-soft);
+  border-color: color-mix(in srgb, var(--red) 32%, transparent);
+  color: var(--red);
+}
+.ledger-micro {
+  margin-top: 8px;
 }

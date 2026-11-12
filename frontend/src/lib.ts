@@ -383,19 +383,27 @@ export const post = (body?: unknown): RequestInit => ({
   method: "POST",
   ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
 });
+// A new declaration starts pre-filled with illustrative demo values (a trusted
+// demo shipper, consistent documents), so the walkthrough needs no typing: the
+// presenter changes one field to show a mismatch or the manual-review path.
 export function initialPayload(d: Detail): Payload {
+  const numbers: Record<string, string> = {
+    invoice: "INV",
+    packing_list: "PL",
+    transport: "CMR",
+  };
   return {
-    shipper: "",
-    consignee: "",
-    description: "",
+    shipper: "Demo Russian Exporter",
+    consignee: "Demo Iranian Importer",
+    description: "General machine parts",
     mass_kg: d.shipment.mass_kg,
-    value_usd: 0,
-    origin_country: "",
-    hs_code: "",
+    value_usd: 45000,
+    origin_country: "RU",
+    hs_code: "847990",
     container_id: d.shipment.container_id,
     documents: Object.keys(docs).map((kind) => ({
       kind,
-      number: "",
+      number: `${lookup(numbers, kind) ?? "DOC"}-${d.shipment.id}`,
       container_id: d.shipment.container_id,
       mass_kg: d.shipment.mass_kg,
     })),
@@ -411,3 +419,114 @@ export const ruleLabels: Record<string, string> = {
   R5: "Страна происхождения в списке разрешённых",
 };
 export const shortHash = (hash: string) => hash.slice(0, 12);
+
+// Integration review: remaining backend strings shown in the UI (event
+// sources, validation issues, 404/409 error details, model disclaimer, audit
+// actions). Kept in one block, merged into `translations`.
+Object.assign(translations, {
+  synthetic: "синтетика",
+  "synthetic-model": "модель",
+  "open-meteo": "Open-Meteo",
+  cache: "кэш",
+  observed: "факт",
+  forecast: "прогноз",
+  save: "Сохранение черновика",
+  validate: "Проверка",
+  submit: "Отправка",
+  review: "Решение проверяющего",
+  "Held-out synthetic history; not validated on real Caspian operations.":
+    "Отложенная часть синтетической истории; не проверено на реальных перевозках по Каспию.",
+  "Field must not be blank": "Поле не должно быть пустым",
+  "Use a two-letter country code": "Укажите двухбуквенный код страны",
+  "Use 6–10 digits": "Укажите от 6 до 10 цифр",
+  "Missing invoice": "Нет инвойса",
+  "Missing packing_list": "Нет упаковочного листа",
+  "Missing transport": "Нет транспортного документа",
+  "Duplicate invoice": "Инвойс указан дважды",
+  "Duplicate packing_list": "Упаковочный лист указан дважды",
+  "Duplicate transport": "Транспортный документ указан дважды",
+  "Container differs from shipment": "Контейнер не совпадает с перевозкой",
+  "Container IDs must match": "Номера контейнеров должны совпадать",
+  "All masses must be within 1 kg": "Массы должны совпадать с точностью до 1 кг",
+  "Revision limit reached for this declaration":
+    "Достигнут лимит версий декларации.",
+  "Submitted declaration must be reviewed before editing":
+    "Отправленную декларацию можно изменить только после решения проверяющего.",
+  "Save a draft before validating": "Сохраните черновик перед проверкой.",
+  "Declaration payload contains invalid text":
+    "Декларация содержит недопустимые символы.",
+  "Declaration payload is too large": "Декларация слишком большая.",
+  "Idempotency key is required": "Не передан ключ повторной отправки.",
+  "Idempotency key is too long": "Ключ повторной отправки слишком длинный.",
+  "Idempotency key conflicts with revised declaration":
+    "Ключ повторной отправки относится к другой версии декларации.",
+  "Declaration must be ready": "Отправить можно только проверенную декларацию.",
+  "Invalid review decision": "Недопустимое решение.",
+  "Invalid review comment": "Недопустимый комментарий.",
+  "Review comment is too long": "Комментарий слишком длинный.",
+  "Only submitted declarations can be reviewed":
+    "Рассмотреть можно только отправленную декларацию.",
+  "Audit limit reached for this declaration":
+    "Достигнут лимит записей журнала.",
+  "Stored declaration is unreadable": "Сохранённая декларация повреждена.",
+  "Stored audit trail is unreadable": "Журнал действий повреждён.",
+  "Stored submission record is unreadable": "Запись об отправке повреждена.",
+  "Not found": "Не найдено.",
+  "Declaration not found": "Декларация не найдена.",
+  "Shipment not found": "Перевозка не найдена.",
+  "Route is no longer feasible; refresh alternatives":
+    "Маршрут больше недоступен; обновите список альтернатив.",
+});
+const fieldLabels: Record<string, string> = {
+  shipper: "Отправитель",
+  consignee: "Получатель",
+  description: "Описание груза",
+  container_id: "Номер контейнера",
+  mass_kg: "Масса",
+  value_usd: "Стоимость",
+  origin_country: "Страна происхождения",
+  hs_code: "Код ТН ВЭД",
+  documents: "Документы",
+};
+const docFieldLabels: Record<string, string> = {
+  number: "номер",
+  container_id: "контейнер",
+  mass_kg: "масса",
+};
+// "documents.1.number" -> "Упаковочный лист: номер".
+export function fieldLabel(field: string, documents: { kind: string }[] = []) {
+  const m = /^documents\.(\d+)\.(\w+)$/.exec(field);
+  if (m) {
+    const kind = documents[Number(m[1])]?.kind;
+    const doc = lookup(docs, kind) ?? `Документ ${Number(m[1]) + 1}`;
+    return `${doc}: ${lookup(docFieldLabels, m[2]) ?? m[2]}`;
+  }
+  return lookup(fieldLabels, field) ?? field;
+}
+export const countries: Record<string, string> = {
+  RU: "Россия",
+  KZ: "Казахстан",
+  TM: "Туркменистан",
+  IR: "Иран",
+  AZ: "Азербайджан",
+  UZ: "Узбекистан",
+};
+// Witness-ledger node labels and chip states (simulated in-process nodes).
+export const ledgerNodeLabels: Record<string, string> = {
+  "customs-ru": "Таможня РФ",
+  "customs-ir": "Таможня Ирана",
+  "port-operator": "Оператор порта",
+};
+export const ledgerStateLabels: Record<string, string> = {
+  in_sync: "синхронизирован",
+  behind: "отстаёт",
+  diverged: "расхождение",
+  invalid_signature: "неверная подпись",
+  unavailable: "недоступен",
+};
+export const ledgerStatusNotes: Record<string, string> = {
+  not_anchored: "последние записи не закреплены",
+  conflict: "локальная цепочка расходится с реестром",
+  no_quorum: "кворум недоступен",
+  disabled: "реестр отключён",
+};

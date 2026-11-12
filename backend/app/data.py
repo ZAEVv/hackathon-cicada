@@ -590,9 +590,9 @@ _SHIPMENTS: list[dict[str, Any]] = [
             "sea-mak-amirabad",
             "rail-amirabad",
         ],
-        "queue_hours": 2.8,
+        "queue_hours": 0.5,
         "observed_delay_hours": 0.0,
-        "documents_ready_at": "2026-11-12T16:00:00Z",
+        "documents_ready_at": "2026-11-12T13:00:00Z",
         "events": [
             _event(
                 "evt-005-1",

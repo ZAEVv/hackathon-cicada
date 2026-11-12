@@ -257,6 +257,7 @@ def test_keyed_chain_uses_hmac_and_verifies(db, monkeypatch):
         assert entry["hash"] != sha256_digest(body)
     result = pc.verify_audit(db, SHIPMENT["id"])
     AuditVerification(**result)
+    assert result.pop("ledger")["status"] == "anchored"  # additive field (witness ledger)
     assert result == {"valid": True, "entries_checked": 4, "first_invalid_sequence": None,
                       "disclaimer": "Hash-chain integrity only; not proof of authenticity or customs approval."}
 
@@ -287,28 +288,35 @@ def test_entry_written_under_other_key_is_first_invalid(db, monkeypatch, early, 
     assert pc.verify_audit(db, SHIPMENT["id"])["first_invalid_sequence"] == 1
 
 
-def test_rewritten_history_is_only_detected_in_keyed_mode(db, monkeypatch):
+def test_rewritten_history_is_detected_by_keys_and_witnesses(tmp_path, monkeypatch):
     def mutate(entry):
         entry["actor"] = "someone-else"
 
-    # Unkeyed: a DB writer can re-link the chain (documented limitation).
+    # Unkeyed: a DB writer can re-link the local chain; only the witness
+    # quorum (simulated ledger) catches it.
+    db = str(tmp_path / "unkeyed.sqlite")
+    pc.init_db(db)
     lifecycle(db)
     rewrite_chain_from(db, 2, mutate, sha256_digest)
-    assert pc.verify_audit(db, SHIPMENT["id"])["valid"]
+    result = pc.verify_audit(db, SHIPMENT["id"])
+    assert not result["valid"] and result["first_invalid_sequence"] == 2
+    assert result["ledger"]["reason"] == "hash_mismatch"
 
     # Keyed: without the key the same rewrite fails at the edited entry,
     # whether recomputed as plain SHA-256 or with a guessed key.
-    raw_execute(db, "DELETE FROM audit_entries")
-    raw_execute(db, "DELETE FROM declarations")
-    raw_execute(db, "DELETE FROM submission_keys")
+    db = str(tmp_path / "keyed.sqlite")
+    pc.init_db(db)
     set_key(monkeypatch, KEY1)
     lifecycle(db)
     for forged_digest in (sha256_digest, hmac_digest(KEY2)):
         rewrite_chain_from(db, 2, mutate, forged_digest)
         result = pc.verify_audit(db, SHIPMENT["id"])
         assert not result["valid"] and result["first_invalid_sequence"] == 2
-    rewrite_chain_from(db, 2, mutate, hmac_digest(KEY1))  # only the key holder can
-    assert pc.verify_audit(db, SHIPMENT["id"])["valid"]
+    # Even the key holder cannot rewrite history the witnesses attested.
+    rewrite_chain_from(db, 2, mutate, hmac_digest(KEY1))
+    result = pc.verify_audit(db, SHIPMENT["id"])
+    assert not result["valid"] and result["first_invalid_sequence"] == 2
+    assert result["ledger"]["reason"] == "hash_mismatch"
 
 
 @pytest.mark.parametrize("short", ["x", "short-key", "a" * 15])
@@ -463,7 +471,9 @@ def test_malformed_or_type_confused_entry_is_invalid_not_raised(db, variant):
 def test_deleted_whole_chain_with_declaration_present_is_invalid(db):
     ready(db)
     raw_execute(db, "DELETE FROM audit_entries")
-    assert pc.verify_audit(db, SHIPMENT["id"]) == {
+    result = pc.verify_audit(db, SHIPMENT["id"])
+    assert result.pop("ledger")["reason"] == "chain_deleted"
+    assert result == {
         "valid": False, "entries_checked": 0, "first_invalid_sequence": 1,
         "disclaimer": "Hash-chain integrity only; not proof of authenticity or customs approval."}
 
@@ -474,16 +484,22 @@ def test_deleted_middle_entry_is_invalid(db):
     assert pc.verify_audit(db, SHIPMENT["id"])["first_invalid_sequence"] == 2
 
 
-def test_known_limitation_tail_truncation_with_declaration_rollback(db, monkeypatch):
-    # Documented inherent limitation: without an external anchor, removing the
-    # tail AND restoring a genuine earlier declaration snapshot is undetectable,
-    # even in keyed mode.
+def test_tail_truncation_with_declaration_rollback(db, monkeypatch):
+    # Local checks alone cannot see removing the tail AND restoring a genuine
+    # earlier declaration snapshot, even in keyed mode; the witness quorum can.
     set_key(monkeypatch, KEY1)
     pc.save_declaration(db, SHIPMENT, copy.deepcopy(PAYLOAD), BROKER, NOW)
     snapshot = raw_execute(db, "SELECT declaration_json FROM declarations")[0][0]
     pc.validate_declaration(db, SHIPMENT, BROKER, NOW)
     raw_execute(db, "DELETE FROM audit_entries WHERE sequence = 2")
     write_declaration(db, snapshot)
+    result = pc.verify_audit(db, SHIPMENT["id"])
+    assert not result["valid"] and result["first_invalid_sequence"] == 2
+    assert result["ledger"]["reason"] == "truncated"
+    # Remaining limitation: the simulated nodes share this disk, so a writer
+    # who also truncates every witness file is not detected.
+    for node, _ in pc.ledger.NODES:
+        raw_execute(pc.ledger.witness_path(db, node), "DELETE FROM attestations WHERE sequence = 2")
     assert pc.verify_audit(db, SHIPMENT["id"])["valid"]
 
 

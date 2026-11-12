@@ -290,11 +290,47 @@ class AuditEntry(Contract):
     hash: str
 
 
+LedgerState = Literal["anchored", "not_anchored", "conflict", "no_quorum", "disabled"]
+LedgerReason = Literal["hash_mismatch", "truncated", "chain_deleted", "unanchored_entries",
+                       "quorum_unavailable", "ledger_disabled"]
+
+
+class LedgerCheck(Contract):
+    """Simulated witness-ledger comparison (in-process nodes; prototype)."""
+    status: LedgerState
+    reason: LedgerReason | None = None
+    anchored: bool
+    quorum: int
+    nodes_total: int
+    nodes_available: int
+    nodes_in_sync: int
+    attested_sequence: int
+    local_sequence: int
+
+
 class AuditVerification(Contract):
     valid: bool
     entries_checked: int
     first_invalid_sequence: int | None = None
     disclaimer: str = "Hash-chain integrity only; not proof of authenticity or customs approval."
+    ledger: LedgerCheck | None = None
+
+
+class LedgerNode(Contract):
+    node_id: str
+    label: str
+    available: bool
+    last_sequence: int | None = None
+    head_hash: str | None = None
+    signature_valid: bool | None = None
+    in_sync: bool
+    state: Literal["in_sync", "behind", "diverged", "invalid_signature", "unavailable"]
+
+
+class LedgerStatus(LedgerCheck):
+    shipment_id: str
+    nodes: list[LedgerNode]
+    disclaimer: str
 
 
 class ShipmentDetail(Contract):

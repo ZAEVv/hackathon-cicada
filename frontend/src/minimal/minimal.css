@@ -151,6 +151,11 @@
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+.md-point {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
 .md-axis {
   display: flex;
   justify-content: space-between;

@@ -63,11 +63,11 @@ REGIONAL_NODE = "makhachkala"
 # small enough that a single 20 t consignment is visible on the curve.
 NODE_PARAMS: dict[str, dict[str, float]] = {
     "rail_hub": {"capacity_tph": 70.0, "base_utilization": 0.50},
-    "makhachkala": {"capacity_tph": 42.0, "base_utilization": 0.52},
-    "olya": {"capacity_tph": 30.0, "base_utilization": 0.46},
-    "anzali": {"capacity_tph": 45.0, "base_utilization": 0.52},
+    "makhachkala": {"capacity_tph": 76.0, "base_utilization": 0.46},
+    "olya": {"capacity_tph": 46.0, "base_utilization": 0.42},
+    "anzali": {"capacity_tph": 76.0, "base_utilization": 0.45},
     "tehran": {"capacity_tph": 60.0, "base_utilization": 0.46},
-    "aktau": {"capacity_tph": 50.0, "base_utilization": 0.52},
+    "aktau": {"capacity_tph": 60.0, "base_utilization": 0.48},
     "turkmenbashi": {"capacity_tph": 48.0, "base_utilization": 0.50},
     "amirabad": {"capacity_tph": 40.0, "base_utilization": 0.50},
 }
