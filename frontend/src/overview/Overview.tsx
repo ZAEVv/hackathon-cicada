@@ -272,6 +272,22 @@ export function Overview({
           style={
             { "--i": 3, "--idx": tab === "list" ? 0 : 1 } as React.CSSProperties
           }
+          onKeyDown={(e) => {
+            const order = ["list", "summary"] as const;
+            const cur = order.indexOf(tab);
+            let next = -1;
+            if (e.key === "ArrowRight") next = (cur + 1) % order.length;
+            else if (e.key === "ArrowLeft")
+              next = (cur - 1 + order.length) % order.length;
+            else if (e.key === "Home") next = 0;
+            else if (e.key === "End") next = order.length - 1;
+            if (next < 0) return;
+            e.preventDefault();
+            setTab(order[next]);
+            e.currentTarget
+              .querySelectorAll<HTMLButtonElement>('[role="tab"]')
+              [next]?.focus();
+          }}
         >
           <span className="seg-goo" aria-hidden="true">
             <i />
@@ -281,6 +297,7 @@ export function Overview({
             type="button"
             role="tab"
             aria-selected={tab === "list"}
+            tabIndex={tab === "list" ? 0 : -1}
             onClick={() => setTab("list")}
           >
             Перевозки <span className="count">{shipments.length}</span>
@@ -289,6 +306,7 @@ export function Overview({
             type="button"
             role="tab"
             aria-selected={tab === "summary"}
+            tabIndex={tab === "summary" ? 0 : -1}
             onClick={() => setTab("summary")}
           >
             Сводка

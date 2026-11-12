@@ -22,7 +22,13 @@ import "./style.css";
 import { MinimalDashboard } from "./minimal/MinimalDashboard";
 import { Overview } from "./overview/Overview";
 import { useSpotlight } from "./motion";
-import { applyTheme, loadTheme, switchTheme, type Theme } from "./theme";
+import {
+  applyTheme,
+  loadTheme,
+  reducedMotion,
+  switchTheme,
+  type Theme,
+} from "./theme";
 import type {
   Audit,
   Dashboard,
@@ -88,13 +94,39 @@ function Logo({ size = 30 }: { size?: number }) {
   );
 }
 
+const PAGE_IDS = PAGES.map((p) => p.id) as readonly string[];
+// Hash format: #/<page>[/<shipment id>]. Values are validated by callers.
+function parseHash(): { page: Page; id: string } {
+  const [pg = "", rawId = ""] = location.hash.replace(/^#\/?/, "").split("/");
+  let id = "";
+  try {
+    id = decodeURIComponent(rawId);
+  } catch {
+    id = "";
+  }
+  return {
+    page: PAGE_IDS.includes(pg) ? (pg as Page) : "overview",
+    id,
+  };
+}
+const TOAST_BY_PATH: Record<string, string> = {
+  "/scenario": "Сценарий применён",
+  "/scenario/reset": "Сценарий сброшен",
+  "/route": "Маршрут выбран",
+  "/preclearance": "Черновик сохранён",
+  "/preclearance/validate": "Черновик проверен",
+  "/preclearance/submit": "Декларация отправлена",
+  "/preclearance/review": "Решение записано",
+};
+
 function App() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null),
     [ports, setPorts] = useState<Port[]>([]),
     [selected, setSelected] = useState(""),
     [detail, setDetail] = useState<Detail | null>(null),
     [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [page, setPage] = useState<Page>("overview"),
+  const initialHash = useRef(parseHash());
+  const [page, setPage] = useState<Page>(initialHash.current.page),
     [broker, setBroker] = useState(() =>
       loadToken(TOKEN_KEYS.broker, DEFAULT_TOKENS.broker),
     ),
@@ -112,14 +144,22 @@ function App() {
     [form, setForm] = useState<Payload | null>(null),
     [audit, setAudit] = useState<Audit[]>([]),
     [verification, setVerification] = useState<Verification | null>(null),
-    [comment, setComment] = useState("");
+    [comment, setComment] = useState(""),
+    [toast, setToast] = useState("");
   const selectedRef = useRef("");
+  const toastTimer = useRef(0);
+  const settingsOpener = useRef<HTMLElement | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const dashboardRef = useRef<Dashboard | null>(null);
+  const switchRef = useRef<(id: string) => void>(() => {});
+  const lastPage = useRef<Page>(initialHash.current.page);
   const refreshVersion = useRef(0);
   const submitKey = useRef<{ scope: string; key: string } | null>(null);
   useSpotlight();
   // Reads accept either role: broker token, else reviewer token.
   const authToken = broker || reviewer;
   const openSettings = () => {
+    settingsOpener.current = document.activeElement as HTMLElement | null;
     setBrokerDraft(broker);
     setReviewerDraft(reviewer);
     setSettings(true);
@@ -128,6 +168,8 @@ function App() {
     setBrokerDraft("");
     setReviewerDraft("");
     setSettings(false);
+    const opener = settingsOpener.current;
+    if (opener && document.contains(opener)) setTimeout(() => opener.focus(), 0);
   };
   const name = (id: string) => {
     const port = ports.find((p) => p.id === id);
@@ -156,6 +198,15 @@ function App() {
     setVerification(null);
     setSelected(id);
   };
+  switchRef.current = switchShipment;
+  const showToast = (msg: string) => {
+    window.clearTimeout(toastTimer.current);
+    setToast(msg);
+    toastTimer.current = window.setTimeout(
+      () => setToast(""),
+      reducedMotion() ? 6000 : 4000,
+    );
+  };
   const refresh = async (id?: string) => {
     const version = ++refreshVersion.current;
     const [dash, cat] = await Promise.all([
@@ -165,7 +216,13 @@ function App() {
     if (version !== refreshVersion.current) return;
     setDashboard(dash);
     setPorts(cat.ports);
-    const target = id || selectedRef.current || dash.shipments[0]?.shipment.id;
+    dashboardRef.current = dash;
+    // The hash id is only honoured when it names a known shipment.
+    const hashId = initialHash.current.id;
+    const fromHash = dash.shipments.find((s) => s.shipment.id === hashId)
+      ?.shipment.id;
+    const target =
+      id || selectedRef.current || fromHash || dash.shipments[0]?.shipment.id;
     if (target) {
       if (!selectedRef.current) {
         selectedRef.current = target;
@@ -227,12 +284,78 @@ function App() {
   }, [page, authToken]);
   useEffect(() => {
     if (!settings) return;
+    const modal = modalRef.current;
+    const focusables = () =>
+      Array.from(
+        modal?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+    modal?.querySelector<HTMLElement>("input")?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeSettings();
+      if (e.key !== "Tab") return;
+      const items = focusables();
+      if (!items.length) return;
+      const first = items[0],
+        last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!modal?.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [settings]);
+  // Keep location.hash in sync: push on page change, replace on selection.
+  useEffect(() => {
+    if ((page === "overview" || page === "documents") && !selected) return;
+    const withId = (page === "overview" || page === "documents") && selected;
+    const hash = "#/" + page + (withId ? "/" + encodeURIComponent(selected) : "");
+    if (location.hash !== hash) {
+      const pageChanged = lastPage.current !== page;
+      history[pageChanged ? "pushState" : "replaceState"](null, "", hash);
+    }
+    lastPage.current = page;
+  }, [page, selected]);
+  useEffect(() => {
+    const onNav = () => {
+      const { page: nextPage, id } = parseHash();
+      lastPage.current = nextPage;
+      setPage(nextPage);
+      const known = dashboardRef.current?.shipments.some(
+        (s) => s.shipment.id === id,
+      );
+      if (known && (nextPage === "overview" || nextPage === "documents"))
+        switchRef.current(id);
+    };
+    window.addEventListener("hashchange", onNav);
+    window.addEventListener("popstate", onNav);
+    return () => {
+      window.removeEventListener("hashchange", onNav);
+      window.removeEventListener("popstate", onNav);
+    };
+  }, []);
+  // Busy feedback: mark the button that started the action and explain
+  // disabled buttons while a request is in flight.
+  useEffect(() => {
+    if (!busy) return;
+    const titled: HTMLElement[] = [];
+    document.querySelectorAll<HTMLButtonElement>("main button:disabled").forEach((b) => {
+      if (!b.title) {
+        b.title = "Идёт запрос…";
+        titled.push(b);
+      }
+    });
+    return () => titled.forEach((b) => b.removeAttribute("title"));
+  }, [busy]);
   const mutate = async (
     path: string,
     options: RequestInit,
@@ -241,6 +364,12 @@ function App() {
   ) => {
     if (!selected || busy || detail?.shipment.id !== selected) return;
     refreshVersion.current++;
+    const trigger = document.activeElement;
+    const marked =
+      trigger instanceof HTMLButtonElement && trigger.closest("main")
+        ? trigger
+        : null;
+    marked?.setAttribute("data-busy", "true");
     setBusy(true);
     setError("");
     try {
@@ -262,9 +391,12 @@ function App() {
         setVerification(null);
       }
       await refresh(selected);
+      const okMsg = TOAST_BY_PATH[path];
+      if (okMsg) showToast(okMsg);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      marked?.removeAttribute("data-busy");
       setBusy(false);
     }
   };
@@ -325,6 +457,17 @@ function App() {
           className="rail-nav"
           aria-label="Разделы"
           style={{ "--idx": pageIndex } as React.CSSProperties}
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+            const btns = Array.from(
+              e.currentTarget.querySelectorAll<HTMLButtonElement>(".rail-btn"),
+            );
+            const i = btns.indexOf(document.activeElement as HTMLButtonElement);
+            if (i < 0) return;
+            e.preventDefault();
+            const step = e.key === "ArrowDown" ? 1 : -1;
+            btns[(i + step + btns.length) % btns.length].focus();
+          }}
         >
           <span className="nav-goo" aria-hidden="true">
             <i />
@@ -415,7 +558,10 @@ function App() {
           </button>
         </div>
       </header>
-      <main className={"stage" + (page === "overview" ? " fixed" : "")}>
+      <main
+        className={"stage" + (page === "overview" ? " fixed" : "")}
+        aria-busy={busy}
+      >
         {error && (
           <div className="error" role="alert">
             <TriangleAlert size={18} />
@@ -929,9 +1075,25 @@ function App() {
           </div>
         )}
       </main>
+      <div className="toast-area" aria-live="polite" role="status">
+        {toast && (
+          <div className="toast" key={toast}>
+            <Check size={16} aria-hidden="true" />
+            <span>{toast}</span>
+            <button
+              type="button"
+              aria-label="Закрыть уведомление"
+              onClick={() => setToast("")}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+      </div>
       {settings && (
         <div className="modal-backdrop" onClick={closeSettings}>
           <div
+            ref={modalRef}
             className="modal card"
             role="dialog"
             aria-modal="true"
