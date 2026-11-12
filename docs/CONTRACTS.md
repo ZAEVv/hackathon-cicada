@@ -176,6 +176,24 @@ required, invalid_format, missing_document, duplicate_document, mass_mismatch, c
 Validation persists ready or validation_failed and issues; submit allowed only ready.
 Reviewer allowed submitted -> demo_accepted or needs_revision only. No automatic real approval.
 
+Ruleset (`demo-rules-v1`): on submit, `evaluate_ruleset(payload, shipment)` runs R1 documents
+consistent (validation passes, mass tolerance 1 kg), R2 HS code not starting with a manual-control
+prefix (93, 2844, 3601-3604), R3 value_usd/mass_kg within 0.05-500, R4 shipper in the trusted list
+(Demo Russian/Kazakh/Iranian Exporter), R5 origin in RU/KZ/IR/AZ/TM/UZ. Result `Clearance`
+{ruleset_id, ruleset_hash (SHA256 of canonical rule definition), decision auto_accepted|manual_review,
+results[{rule_id, passed, detail}]} is stored on the declaration and in the `submit` audit payload.
+All pass => status `auto_accepted` (demo decision, not customs release); otherwise `submitted`
+for the reviewer. Lists are illustrative demo parameters.
+
+Witness ledger (`backend/app/ledger.py`, prototype): after each committed audit entry, three
+in-process nodes `customs-ru`, `customs-ir`, `port-operator` (own SQLite `<db>.witness-<id>.sqlite3`,
+own HMAC-SHA256 key; `LEDGER_WITNESS_KEYS` overrides the non-secret demo keys) append
+(shipment_id, sequence, entry_hash, previous_hash, at) only as the next record of their own chain.
+Anchored = accepted by >= 2 of 3. Node failure never blocks the local change. Verify compares the
+local chain with quorum-attested hashes: mismatch/truncation => `conflict` and
+`first_invalid_sequence`; unanchored tail => `not_anchored`; < 2 usable nodes => `no_quorum`;
+in-memory DB => `disabled`. Not a network: one process, one disk, symmetric keys.
+
 Submit idempotency stored transactionally under (actor.id, shipment_id, key), along with
 version/content hash and response JSON. Same key/same version returns original response without
 new audit; same key after document revision => ValueError conflict. Check replay BEFORE state
@@ -225,14 +243,18 @@ reset on process restart, documented single-user demo. Documents/audit persist.
 | POST /api/shipments/{id}/preclearance/submit | none, Idempotency-Key header required | Declaration | broker |
 | POST /api/shipments/{id}/preclearance/review | ReviewRequest | Declaration | reviewer |
 | GET /api/shipments/{id}/audit | — | AuditEntry[] | broker or reviewer |
-| GET /api/shipments/{id}/audit/verify | — | AuditVerification | broker or reviewer |
+| GET /api/shipments/{id}/audit/verify | — | AuditVerification (+ `ledger` summary) | broker or reviewer |
+| GET /api/shipments/{id}/ledger | — | LedgerStatus (per-node state, quorum, attested_sequence) | broker or reviewer |
+| GET /api/preclearance/ruleset | — | Ruleset {id, ruleset_hash, rules[{id, description, parameters}]} | broker or reviewer |
+| GET /api/hubs/forecast?shipment_id= | — | HubForecast (72 h hourly load, bottlenecks) | broker or reviewer |
+| GET /api/summary?weeks=4\|13 | — | CorridorSummary (weekly tonnage, KPIs, mode split) | broker or reviewer |
 
 Every successful mutation returns 200. No declaration for validate/submit => 404;
 unknown shipment => 404. Missing Idempotency-Key => 422. Errors FastAPI {"detail":...}.
 Scenario apply REPLACES profile, never stacks; apply/reset clears route selection only.
 Main snapshots original shipment, overlays weather via scenario, passes profile to predict;
 do not add arrival/queue effects twice. Documents readiness: if latest declaration exists
-and is not ready/submitted/demo_accepted, main sets documents_ready_at=max(original,
+and is not ready/submitted/auto_accepted/demo_accepted, main sets documents_ready_at=max(original,
 simulation_now+12h); validated-ready or accepted restores original timestamp. No declaration
 uses seeded timestamp. Always recompute after document changes so routing reflects readiness.
 
