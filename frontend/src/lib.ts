@@ -45,6 +45,7 @@ export const statuses: Record<string, string> = {
   validation_failed: "Есть замечания",
   ready: "Готова к отправке",
   submitted: "На рассмотрении",
+  auto_accepted: "Одобрена автоматически",
   demo_accepted: "Принята в демо",
   needs_revision: "На доработке",
 };
@@ -334,3 +335,13 @@ export function initialPayload(d: Detail): Payload {
     })),
   };
 }
+
+// Smart-contract rule labels (rule ids come from GET /api/preclearance/ruleset).
+export const ruleLabels: Record<string, string> = {
+  R1: "Документы согласованы с декларацией",
+  R2: "Код ТН ВЭД вне списка ручного контроля",
+  R3: "Стоимость за кг в допустимом диапазоне",
+  R4: "Отправитель в списке доверенных участников",
+  R5: "Страна происхождения в списке разрешённых",
+};
+export const shortHash = (hash: string) => hash.slice(0, 12);

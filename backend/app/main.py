@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from . import data, hubs, preclearance, predictive, routing, security, summary
 from .schemas import (
     SIMULATION_NOW, CorridorSummary, AuditEntry, AuditVerification, ChooseRouteRequest,
-    Dashboard, Declaration, DeclarationInput, IdempotencyKey, ModelMetrics,
+    Dashboard, Declaration, Ruleset, DeclarationInput, IdempotencyKey, ModelMetrics,
     ReviewRequest, ScenarioRequest, ShipmentDetail, ShipmentId,
 )
 from .schemas import HubForecast
@@ -180,7 +180,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def detail(shipment_id):
         item = shipment(shipment_id)
         declaration = preclearance.get_declaration(app.state.db, shipment_id)
-        if declaration and declaration["status"] not in {"ready", "submitted", "demo_accepted"}:
+        if declaration and declaration["status"] not in {"ready", "submitted", "auto_accepted", "demo_accepted"}:
             original = datetime.fromisoformat(item["documents_ready_at"].replace("Z", "+00:00"))
             delayed = datetime.fromisoformat(SIMULATION_NOW.replace("Z", "+00:00")) + timedelta(hours=12)
             item["documents_ready_at"] = max(original, delayed).isoformat().replace("+00:00", "Z")
@@ -287,6 +287,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
             app.state.selected[shipment_id] = body.route_id
             return detail(shipment_id)
 
+    @app.get("/api/preclearance/ruleset", response_model=Ruleset, dependencies=authenticated)
+    def ruleset():
+        return preclearance.ruleset()
+
     @app.get("/api/shipments/{shipment_id}/preclearance", response_model=Declaration | None,
              dependencies=authenticated)
     def declaration(shipment_id: ShipmentId):
@@ -310,9 +314,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.post("/api/shipments/{shipment_id}/preclearance/submit", response_model=Declaration)
     def submit(shipment_id: ShipmentId, idempotency_key: Annotated[IdempotencyKey, Header()],user=Depends(broker)):
         with lock:
-            shipment(shipment_id)
+            item = shipment(shipment_id)
             with _domain_errors():
-                return preclearance.submit_declaration(app.state.db, shipment_id, idempotency_key, user, SIMULATION_NOW)
+                return preclearance.submit_declaration(app.state.db, shipment_id, idempotency_key, user, SIMULATION_NOW, item)
 
     @app.post("/api/shipments/{shipment_id}/preclearance/review", response_model=Declaration)
     def review(shipment_id: ShipmentId, body: ReviewRequest, user=Depends(actor)):

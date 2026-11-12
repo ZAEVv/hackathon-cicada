@@ -37,6 +37,7 @@ import type {
   Metrics,
   Payload,
   Port,
+  Ruleset,
   Verification,
 } from "./types";
 import {
@@ -54,6 +55,8 @@ import {
   portName,
   portShortName,
   post,
+  ruleLabels,
+  shortHash,
   statuses,
   storeToken,
   toAmount,
@@ -145,7 +148,8 @@ function App() {
     [audit, setAudit] = useState<Audit[]>([]),
     [verification, setVerification] = useState<Verification | null>(null),
     [comment, setComment] = useState(""),
-    [toast, setToast] = useState("");
+    [toast, setToast] = useState(""),
+    [ruleset, setRuleset] = useState<Ruleset | null>(null);
   const selectedRef = useRef("");
   const toastTimer = useRef(0);
   const settingsOpener = useRef<HTMLElement | null>(null);
@@ -276,6 +280,12 @@ function App() {
       active = false;
     };
   }, [selected, authToken]);
+  useEffect(() => {
+    if (page !== "documents" || !authToken) return;
+    api<Ruleset>("/preclearance/ruleset", {}, authToken)
+      .then(setRuleset)
+      .catch(() => setRuleset(null));
+  }, [page, authToken]);
   useEffect(() => {
     if (page === "model" && !metrics)
       api<Metrics>("/model/metrics", {}, authToken)
@@ -665,6 +675,10 @@ function App() {
                       </p>
                     </div>
                   </div>
+                  <ClearanceStepper
+                    status={d.preclearance?.status}
+                    dirty={dirty}
+                  />
                   <div className="document-grid">
                     <section
                       className="card form-card reveal"
@@ -860,6 +874,10 @@ function App() {
                       )}
                     </section>
                     <div>
+                      <ClearanceCard
+                        ruleset={ruleset}
+                        declaration={dirty ? null : d.preclearance}
+                      />
                       <section
                         className="card review-card reveal"
                         style={{ "--i": 3 } as React.CSSProperties}
@@ -1167,6 +1185,96 @@ function App() {
     </div>
   );
 }
+function ClearanceStepper({
+  status,
+  dirty,
+}: {
+  status?: string;
+  dirty: boolean;
+}) {
+  const current = dirty
+    ? 0
+    : status === "ready"
+      ? 2
+      : status === "draft" || status === "validation_failed"
+        ? 1
+        : status
+          ? 3
+          : 0;
+  const decided = !dirty && (status === "auto_accepted" || status === "demo_accepted");
+  const steps = ["Сохранить", "Проверить", "Отправить", "Решение"];
+  return (
+    <ol className="stepper reveal" aria-label="Этапы оформления">
+      {steps.map((label, i) => {
+        const state =
+          i < current || (i === 3 && decided) ? "done" : i === current ? "current" : "upcoming";
+        return (
+          <li key={label} className={state} aria-current={state === "current" ? "step" : undefined}>
+            <span>{state === "done" ? "✓" : i + 1}</span>
+            {label}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function ClearanceCard({
+  ruleset,
+  declaration,
+}: {
+  ruleset: Ruleset | null;
+  declaration: Declaration | null;
+}) {
+  const clearance = declaration?.clearance ?? null;
+  const results = clearance?.results ?? [];
+  const rules = ruleset?.rules.map((r) => r.id) ?? clearance?.results.map((r) => r.rule_id) ?? [];
+  const failed = clearance?.results.filter((r) => !r.passed).map((r) => r.rule_id) ?? [];
+  const id = clearance?.ruleset_id ?? ruleset?.id;
+  const hash = clearance?.ruleset_hash ?? ruleset?.ruleset_hash;
+  return (
+    <section className="card clearance-card reveal">
+      <div className="card-heading">
+        <div>
+          <h3>Смарт-контракт оформления</h3>
+          <p>
+            {id ?? "—"}
+            {hash && <span className="mono" title={hash}> · {shortHash(hash)}</span>}
+          </p>
+        </div>
+        <ShieldCheck size={19} className="muted" />
+      </div>
+      <ul className="rule-list">
+        {rules.map((rid) => {
+          const r = results.find((x) => x.rule_id === rid);
+          return (
+            <li key={rid} className={r ? (r.passed ? "pass" : "fail") : undefined}>
+              <b>{r ? (r.passed ? "✓" : "✗") : "·"}</b>
+              <span>
+                {rid}: {lookup(ruleLabels, rid) ?? rid}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {clearance?.decision === "auto_accepted" && (
+        <div className="clearance-banner ok" role="status">
+          Одобрено автоматически по правилам {clearance.ruleset_id}
+        </div>
+      )}
+      {clearance?.decision === "manual_review" && (
+        <div className="clearance-banner manual" role="status">
+          Требуется ручная проверка: {failed.join(", ")}
+        </div>
+      )}
+      <p className="micro">
+        Демонстрационные правила, не таможенное решение. Хэш набора правил
+        защищает сами правила от незаметных изменений.
+      </p>
+    </section>
+  );
+}
+
 function Kpi({
   icon,
   label,

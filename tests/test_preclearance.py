@@ -704,3 +704,73 @@ def test_replay_after_review_returns_original_submission(db):
     replay = pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW)
     assert replay == submitted and replay["status"] == "submitted"
     Declaration(**replay)
+
+
+TRUSTED = "Demo Russian Exporter"
+
+
+def _trusted_ready(db):
+    payload = copy.deepcopy(PAYLOAD)
+    payload.update(shipper=TRUSTED, value_usd=45000)
+    pc.save_declaration(db, SHIPMENT, payload, BROKER, NOW)
+    return pc.validate_declaration(db, SHIPMENT, BROKER, NOW)
+
+
+def test_ruleset_hash_is_stable_and_covers_parameters(monkeypatch):
+    first = pc.ruleset_hash()
+    assert first == pc.ruleset_hash() and len(first) == 64
+    monkeypatch.setattr(pc, "TRUSTED_SHIPPERS", ("Someone Else",))
+    monkeypatch.setattr(pc, "_RULES", tuple(
+        (rid, desc, {"trusted_shippers": ["Someone Else"]} if rid == "R4" else params, check, fail)
+        for rid, desc, params, check, fail in pc._RULES))
+    assert pc.ruleset_hash() != first
+
+
+def test_evaluate_ruleset_is_deterministic_and_never_echoes_input():
+    payload = copy.deepcopy(PAYLOAD)
+    payload["shipper"] = "SECRET-MARKER"
+    result = pc.evaluate_ruleset(payload, SHIPMENT)
+    assert result == pc.evaluate_ruleset(payload, SHIPMENT)
+    assert result["decision"] == "manual_review" and "SECRET-MARKER" not in json.dumps(result)
+    payload["mass_kg"] = 0
+    assert not next(r for r in pc.evaluate_ruleset(payload, SHIPMENT)["results"] if r["rule_id"] == "R3")["passed"]
+
+
+def test_auto_accept_audit_valid_replay_and_tamper_detection(db):
+    _trusted_ready(db)
+    submitted = pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW, SHIPMENT)
+    assert submitted["status"] == "auto_accepted" and submitted["clearance"]["decision"] == "auto_accepted"
+    Declaration(**submitted)
+    audit = pc.get_audit(db, SHIPMENT["id"])
+    assert audit[-1]["action"] == "submit" and audit[-1]["payload"]["status"] == "auto_accepted"
+    assert audit[-1]["payload"]["clearance"]["ruleset_hash"] == pc.ruleset_hash()
+    for entry in audit:
+        AuditEntry(**entry)
+    assert pc.verify_audit(db, SHIPMENT["id"])["valid"]
+    assert pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW, SHIPMENT) == submitted
+    assert len(pc.get_audit(db, SHIPMENT["id"])) == len(audit)
+    with pytest.raises(ValueError):
+        pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "", REVIEWER, NOW)
+    # Editing the stored clearance on the declaration row is detected.
+    declaration = read_declaration(db)
+    declaration["clearance"]["results"][0]["passed"] = False
+    write_declaration(db, declaration)
+    assert not pc.verify_audit(db, SHIPMENT["id"])["valid"]
+
+
+def test_tampered_submit_clearance_entry_is_detected(db):
+    _trusted_ready(db)
+    pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW, SHIPMENT)
+    entry = raw_entries(db)[-1]
+    entry["payload"]["clearance"]["results"][3]["passed"] = False
+    write_entry_text(db, entry["sequence"], canonical(entry))
+    result = pc.verify_audit(db, SHIPMENT["id"])
+    assert not result["valid"] and result["first_invalid_sequence"] == entry["sequence"]
+
+
+def test_untrusted_shipper_stays_submitted_and_reviewable(db):
+    ready(db)
+    submitted = pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW, SHIPMENT)
+    assert submitted["status"] == "submitted" and submitted["clearance"]["decision"] == "manual_review"
+    assert pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "", REVIEWER, NOW)["status"] == "demo_accepted"
+    assert pc.verify_audit(db, SHIPMENT["id"])["valid"]

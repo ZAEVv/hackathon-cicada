@@ -3280,3 +3280,94 @@ main.stage[aria-busy="true"] button:disabled {
     animation-duration: 1.6s;
   }
 }
+
+/* Smart-contract clearance: stepper, rule card, decision banners */
+.stepper {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.stepper li {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--muted);
+  font-size: 13px;
+}
+.stepper li > span {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+.stepper li.done {
+  color: var(--green);
+}
+.stepper li.done > span {
+  background: var(--green-soft);
+  border-color: var(--green);
+}
+.stepper li.current {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.stepper li.current > span {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.rule-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.rule-list li {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.rule-list li.pass b {
+  color: var(--green);
+}
+.rule-list li.fail b {
+  color: var(--red);
+}
+.rule-list li.fail {
+  color: var(--text);
+}
+.clearance-banner {
+  margin-top: 12px;
+  padding: 11px 13px;
+  border-radius: var(--r-md);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.clearance-banner.ok {
+  background: var(--green-soft);
+  border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
+  color: var(--green);
+}
+.clearance-banner.manual {
+  background: var(--amber-soft);
+  border: 1px solid color-mix(in srgb, var(--amber) 32%, transparent);
+  color: var(--amber);
+}
+@media (max-width: 720px) {
+  .stepper {
+    flex-direction: column;
+  }
+}

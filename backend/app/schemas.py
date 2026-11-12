@@ -234,16 +234,43 @@ class ValidationResult(Contract):
     issues: list[ValidationIssue]
 
 
+class RuleResult(Contract):
+    rule_id: str
+    passed: bool
+    detail: str
+
+
+class Clearance(Contract):
+    ruleset_id: str
+    ruleset_hash: str
+    decision: Literal["auto_accepted", "manual_review"]
+    results: list[RuleResult]
+
+
+class RuleInfo(Contract):
+    id: str
+    description: str
+    parameters: dict[str, Any]
+
+
+class Ruleset(Contract):
+    id: str
+    ruleset_hash: str
+    rules: list[RuleInfo]
+
+
 class Declaration(Contract):
     id: str
     shipment_id: str
     version: int
-    status: Literal["draft", "validation_failed", "ready", "submitted", "demo_accepted", "needs_revision"]
+    status: Literal["draft", "validation_failed", "ready", "submitted", "auto_accepted", "demo_accepted",
+                    "needs_revision"]
     payload: StoredDeclarationInput
     validation: ValidationResult
     content_hash: str
     updated_at: str = SIMULATION_NOW
     demo_only: bool = True
+    clearance: Clearance | None = None
 
 
 class ReviewRequest(Contract):
