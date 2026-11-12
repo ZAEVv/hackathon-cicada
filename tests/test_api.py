@@ -58,7 +58,7 @@ def test_dashboard_and_unknown_shipment_contract(client):
     assert response.status_code == 200
     dashboard = response.json()
     assert dashboard["synthetic"] is True
-    assert dashboard["summary"]["total"] == len(dashboard["shipments"]) == 3
+    assert dashboard["summary"]["total"] == len(dashboard["shipments"]) == 6
     detail = dashboard["shipments"][0]
     assert {"shipment", "weather", "scenario", "prediction", "current_route", "alternatives",
             "selected_route_id", "preclearance", "simulation_now", "synthetic"} <= detail.keys()
@@ -376,3 +376,25 @@ def test_api_docs_can_be_enabled_explicitly(tmp_path, monkeypatch):
     with TestClient(create_app(str(tmp_path / "docs.sqlite3"))) as docs_client:
         assert docs_client.get("/openapi.json").status_code == 200
         assert docs_client.get("/docs").status_code == 200
+
+
+def test_eastern_branch_shipments_and_amirabad_alternative_under_closure(client):
+    dashboard = client.get("/api/dashboard", headers=BROKER).json()
+    ids = [row["shipment"]["id"] for row in dashboard["shipments"]]
+    assert ids == [f"SCT-00{n}" for n in range(1, 7)]
+
+    closed = client.post(f"{SHIPMENT}/scenario", json={"kind": "closure"}, headers=BROKER).json()
+    assert closed["current_route"]["feasible"] is False
+    assert any(
+        leg["destination_id"] == "amirabad" and leg["service_id"] == "sea-mak-amirabad"
+        for alt in closed["alternatives"] for leg in alt["legs"]
+    )
+    for alt in closed["alternatives"]:
+        assert all(leg["service_id"] != "sea-main" for leg in alt["legs"])
+
+    # Eastern shipments resolve routes through Amirabad under the base scenario.
+    for shipment_id in ("SCT-004", "SCT-005", "SCT-006"):
+        detail = client.get(f"/api/shipments/{shipment_id}", headers=BROKER).json()
+        services = [leg["service_id"] for leg in detail["current_route"]["legs"]]
+        assert services[-1] == "rail-amirabad"
+        assert detail["current_route"]["legs"][-1]["destination_id"] == "tehran"

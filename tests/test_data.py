@@ -96,7 +96,10 @@ def test_catalog_has_required_ports_and_services(demo: dict) -> None:
     assert set(demo) == {"ports", "services", "shipments", "history"}
 
     ports = {port["id"]: port for port in demo["ports"]}
-    assert set(ports) == {"rail_hub", "makhachkala", "olya", "anzali", "tehran"}
+    assert set(ports) == {
+        "rail_hub", "makhachkala", "olya", "anzali", "tehran",
+        "aktau", "turkmenbashi", "amirabad",
+    }
     assert ports["rail_hub"]["kind"] == "terminal"
     assert ports["tehran"]["kind"] == "destination"
     assert ports["makhachkala"]["kind"] == "port"
@@ -165,12 +168,15 @@ def test_schedule_horizon_and_frozen_sea_departures(demo: dict) -> None:
         assert max(gaps) <= timedelta(hours=6)
 
 
-def test_three_demo_shipments_and_sct001_contract(demo: dict) -> None:
+def test_demo_shipments_and_sct001_contract(demo: dict) -> None:
     shipments = demo["shipments"]
     assert [shipment["id"] for shipment in shipments] == [
         "SCT-001",
         "SCT-002",
         "SCT-003",
+        "SCT-004",
+        "SCT-005",
+        "SCT-006",
     ]
     services = {service["id"]: service for service in demo["services"]}
     for shipment in shipments:
@@ -713,3 +719,37 @@ def test_cache_write_failure_cleans_up_temp_file(
     assert weather["source"] == "open-meteo"  # caching stays best-effort
     assert cache_path.read_text(encoding="utf-8") == "previous"
     assert [p.name for p in tmp_path.iterdir()] == ["weather-cache.json"]
+
+
+def test_eastern_branch_ports_services_and_shipments(demo: dict) -> None:
+    ports = {port["id"]: port for port in demo["ports"]}
+    assert ports["amirabad"]["country"] == "IR"
+    assert ports["aktau"]["country"] == "KZ"
+    assert ports["turkmenbashi"]["country"] == "TM"
+    assert all(ports[i]["kind"] == "port" for i in ("aktau", "turkmenbashi", "amirabad"))
+
+    services = {service["id"]: service for service in demo["services"]}
+    expected = {
+        "rail-east": ("rail_hub", "aktau", "rail"),
+        "sea-aktau": ("aktau", "amirabad", "sea"),
+        "rail-kz-tm": ("aktau", "turkmenbashi", "rail"),
+        "sea-tkm": ("turkmenbashi", "amirabad", "sea"),
+        "sea-mak-amirabad": ("makhachkala", "amirabad", "sea"),
+        "rail-amirabad": ("amirabad", "tehran", "rail"),
+    }
+    for service_id, (origin, destination, mode) in expected.items():
+        service = services[service_id]
+        assert (service["origin_id"], service["destination_id"], service["mode"]) == (
+            origin, destination, mode)
+        assert service["capacity_tonnes"] >= 40
+        Service.model_validate(service)
+
+    for shipment in demo["shipments"][3:]:
+        assert shipment["destination_id"] == "tehran"
+        assert shipment["current_location_id"] in ports
+        assert {event["location_id"] for event in shipment["events"]} <= set(ports)
+
+    for port_id in ("aktau", "turkmenbashi", "amirabad"):
+        first = get_weather(port_id)
+        assert first == get_weather(port_id)
+        assert first["source"] == "synthetic"
