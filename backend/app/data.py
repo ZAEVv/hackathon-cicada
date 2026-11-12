@@ -686,6 +686,19 @@ def _finite_number(value: Any) -> bool:
         return False
 
 
+def estimate_wave_height_m(wind_mps: float) -> float:
+    """Documented fallback sea-state estimate (significant wave height, m) from wind.
+
+    Used wherever no wave height is available (Open-Meteo forecast has no marine
+    data).  A crude fetch-limited Caspian rule of thumb: Hs ~ 0.2 + 0.009 * wind^2,
+    i.e. ~0.3-0.8 m for calm winds (3-7 m/s), ~2.2 m at 15 m/s and ~4.6 m in a
+    22 m/s storm, capped at 8 m.  Deterministic and monotonic in wind.
+    """
+
+    wind = max(0.0, float(wind_mps))
+    return round(min(8.0, 0.2 + 0.009 * wind * wind), 2)
+
+
 def _delay_hours(
     *,
     is_storm: bool,
@@ -695,6 +708,7 @@ def _delay_hours(
     observed_delay_hours: float,
     mass_tonnes: float,
     rng: random.Random,
+    wave_height_m: float = 0.0,
 ) -> float:
     """Nonlinear synthetic delay surface used by the seeded history.
 
@@ -710,7 +724,9 @@ def _delay_hours(
         + 0.10 * observed_delay_hours
     )
     wind_excess = max(0.0, wind_mps - 9.0)
-    weather = 0.035 * wind_excess**1.8 + 0.06 * precipitation_mm**1.35
+    # Sea-state penalty: nothing below ~1.7 m, then superlinear (ferries slow/hold).
+    sea_state = 0.45 * max(0.0, wave_height_m - 1.7) ** 1.5
+    weather = 0.035 * wind_excess**1.8 + 0.06 * precipitation_mm**1.35 + sea_state
     wind_queue_interaction = (
         0.009 * queue_hours * max(0.0, wind_mps - 8.0) ** 1.35
     )
@@ -780,6 +796,15 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
             hours_to_cutoff = round(rng.uniform(2.0, 72.0), 2)
 
         mass_tonnes = round(rng.uniform(5.0, 35.0), 1)
+        # Seeded sea state correlated with wind (drawn after all other fields so
+        # the existing draw order is untouched).
+        wave_height_m = round(
+            min(
+                MAX_WAVE_HEIGHT_M,
+                max(0.1, estimate_wave_height_m(wind_mps) * rng.uniform(0.7, 1.3)),
+            ),
+            2,
+        )
         delay_hours = _delay_hours(
             is_storm=regime == "storm",
             queue_hours=queue_hours,
@@ -788,6 +813,7 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
             observed_delay_hours=observed_delay_hours,
             mass_tonnes=mass_tonnes,
             rng=rng,
+            wave_height_m=wave_height_m,
         )
         missed_connection = int(
             observed_delay_hours + queue_hours + delay_hours > hours_to_cutoff
@@ -798,6 +824,7 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
                 "observed_at": observed_at,
                 "queue_hours": queue_hours,
                 "wind_mps": wind_mps,
+                "wave_height_m": wave_height_m,
                 "precipitation_mm": precipitation_mm,
                 "observed_delay_hours": observed_delay_hours,
                 "mass_tonnes": mass_tonnes,
@@ -843,12 +870,25 @@ _SYNTHETIC_WEATHER: dict[str, dict[str, float]] = {
 _PORT_BY_ID = {port["id"]: port for port in _PORTS}
 
 
+# Synthetic sea state per port (m), consistent with the wind above.  Inland nodes
+# have no sea state.  Ports missing here fall back to estimate_wave_height_m(wind).
+_SYNTHETIC_WAVE_M: dict[str, float] = {
+    "rail_hub": 0.0,
+    "makhachkala": 0.5,
+    "olya": 0.6,
+    "anzali": 0.4,
+    "tehran": 0.0,
+}
+
+
 def _synthetic_weather(port_id: str) -> dict[str, Any]:
     values = _SYNTHETIC_WEATHER[port_id]
     return {
         "wind_mps": values["wind_mps"],
         "precipitation_mm": values["precipitation_mm"],
-        "wave_height_m": None,
+        "wave_height_m": _SYNTHETIC_WAVE_M.get(
+            port_id, estimate_wave_height_m(values["wind_mps"])
+        ),
         "source": "synthetic",
         "observed_at": SIMULATION_NOW,
         "stale": False,

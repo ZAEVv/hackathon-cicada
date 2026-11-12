@@ -126,6 +126,7 @@ class Scenario(Contract):
     arrival_delay_hours: float = 0
     queue_extra_hours: float = 0
     wind_mps: float | None = None
+    wave_height_m: float | None = None
     blocked_service_ids: list[str] = Field(default_factory=list)
 
 

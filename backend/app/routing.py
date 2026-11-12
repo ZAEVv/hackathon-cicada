@@ -15,6 +15,8 @@ def scenario_profile(kind: str) -> dict:
         "arrival_delay_hours": 3 if kind == "storm" else 0,
         "queue_extra_hours": 2 if kind == "storm" else 6 if kind == "congestion" else 0,
         "wind_mps": 22 if kind == "storm" else None,
+        # Storm implies a high sea state (m); None keeps the weather/wind-derived value.
+        "wave_height_m": 4.5 if kind == "storm" else None,
         "blocked_service_ids": ["sea-main"] if kind == "closure" else [],
     }
 

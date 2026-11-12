@@ -925,8 +925,12 @@ export function Overview({
                 Погода: {d.weather.source}
                 {d.weather.stale ? " (устарела)" : ""}, базовый ветер{" "}
                 {fmt(d.weather.wind_mps, 1)} м/с
+                {d.weather.wave_height_m != null &&
+                  `, волнение ${fmt(d.weather.wave_height_m, 1)} м`}
                 {d.scenario.wind_mps != null &&
-                  ` · ветер сценария: ${fmt(d.scenario.wind_mps, 1)} м/с`}{" "}
+                  ` · ветер сценария: ${fmt(d.scenario.wind_mps, 1)} м/с`}
+                {d.scenario.wave_height_m != null &&
+                  ` · волнение сценария: ${fmt(d.scenario.wave_height_m, 1)} м`}{" "}
                 · прогноз: {d.prediction.data_source},{" "}
                 {d.prediction.model_version}. Расписание и показатели
                 демонстрационные.
