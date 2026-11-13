@@ -158,7 +158,7 @@ from fastapi.testclient import TestClient
 from backend.app.main import create_app
 import tempfile, os
 with TestClient(create_app(os.path.join(tempfile.mkdtemp(), "x.sqlite3"))) as c:
-    h = {"Authorization": "Bearer demo-broker-token"}
+    h = {"Authorization": "Bearer dev-broker-token"}
     after = c.post("/api/shipments/SCT-002/scenario", json={"kind":"storm"}, headers=h).json()
     ev = {e["event_type"]: e for e in after["shipment"]["events"]}
     print("road_departure estimated_at:", ev["road_departure"]["estimated_at"])  # unchanged

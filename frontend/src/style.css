@@ -163,10 +163,6 @@ button:disabled {
 .tone-green-text {
   color: var(--green);
 }
-.goo-defs {
-  position: absolute;
-  pointer-events: none;
-}
 
 /* ------------------------------------------------------------------ */
 /* Shell: rail, top bar, stage                                         */
@@ -239,11 +235,11 @@ button:disabled {
 .rail-text {
   display: none;
 }
-/* Liquid indicator: two blobs with different speeds, fused by the goo filter. */
+/* Sliding indicators (rail, theme toggle, segmented control) are a single
+   plain thumb: filters on moving elements leave repaint trails. */
 .nav-goo {
   position: absolute;
   inset: 0;
-  filter: url(#goo);
   pointer-events: none;
 }
 .nav-goo i {
@@ -256,10 +252,6 @@ button:disabled {
   background: var(--card-3);
   transform: translateY(calc(var(--idx, 0) * 54px));
   transition: transform 0.5s var(--ease-spring);
-}
-.nav-goo i:last-child {
-  scale: 0.76;
-  transition: transform 0.85s var(--ease-out);
 }
 
 .topbar {
@@ -370,7 +362,6 @@ button:disabled {
 .tt-goo {
   position: absolute;
   inset: 3px;
-  filter: url(#goo);
   pointer-events: none;
 }
 .tt-goo i {
@@ -382,10 +373,6 @@ button:disabled {
   border-radius: 50%;
   background: var(--card-3);
   transition: transform 0.55s var(--ease-spring);
-}
-.tt-goo i:last-child {
-  scale: 0.7;
-  transition: transform 0.9s var(--ease-out);
 }
 .theme-toggle[aria-checked="true"] .tt-goo i {
   transform: translateX(42px);
@@ -828,7 +815,6 @@ button:disabled {
   justify-items: center;
   text-align: center;
 }
-
 /* ------------------------------------------------------------------ */
 /* Overview: three panels                                              */
 /* ------------------------------------------------------------------ */
@@ -855,6 +841,8 @@ button:disabled {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* The toolbar and hub bar adapt to the column, not the viewport. */
+  container: ov-center / inline-size;
 }
 /* Panels scroll; their sections keep their natural height. */
 .ov-left > *,
@@ -1045,7 +1033,6 @@ button:disabled {
 .seg-goo {
   position: absolute;
   inset: 4px;
-  filter: url(#goo);
   pointer-events: none;
 }
 .seg-goo i {
@@ -1055,10 +1042,6 @@ button:disabled {
   background: var(--card-3);
   transform: translateX(calc(var(--idx, 0) * 100%));
   transition: transform 0.5s var(--ease-spring);
-}
-.seg-goo i:last-child {
-  scale: 0.8 0.7;
-  transition: transform 0.85s var(--ease-out);
 }
 .seg button {
   position: relative;
@@ -1326,22 +1309,11 @@ button:disabled {
   font-size: 12px;
   line-height: 1.35;
 }
-.demo-note {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: auto;
-  padding-top: 6px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.demo-note .pulse {
-  color: var(--green);
-}
 
 /* Centre toolbar */
 .tools {
   display: flex;
+  flex-wrap: wrap;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
@@ -1354,7 +1326,7 @@ button:disabled {
   border-right: 1px dashed var(--line-2);
 }
 .tool-group:last-child {
-  flex: 1;
+  flex: 1 1 150px;
   border-right: 0;
 }
 .tool-label {
@@ -1363,6 +1335,7 @@ button:disabled {
 }
 .tool-items {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 .tool {
@@ -1391,6 +1364,7 @@ button.tool:active {
   transform: scale(0.94);
 }
 .tool-text {
+  max-width: 100%;
   height: 32px;
   display: flex;
   align-items: center;
@@ -1416,6 +1390,57 @@ button.tool:active {
 }
 .map-svg {
   display: block;
+}
+/* Map zoom: wheel / double click / buttons, drag to pan once zoomed in. */
+.map-svg {
+  touch-action: pan-y;
+}
+.map.zoomable .map-svg {
+  cursor: grab;
+}
+.map.dragging .map-svg {
+  cursor: grabbing;
+}
+.map.dragging {
+  user-select: none;
+}
+.map-zoom {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--card);
+  overflow: hidden;
+}
+.map-zoom button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+.map-zoom button + button {
+  border-top: 1px solid var(--line);
+}
+.map-zoom button:disabled {
+  color: var(--muted);
+  opacity: 0.45;
+}
+.hoverable .map-zoom button:hover:not(:disabled) {
+  background: var(--card-2);
+  color: var(--text);
+}
+.map-zoom button:active:not(:disabled) {
+  background: var(--card-3);
 }
 .map-empty {
   height: 100%;
@@ -1489,7 +1514,12 @@ button.tool:active {
   fill: var(--text);
   stroke: var(--cyan);
   stroke-width: 2.5;
-  filter: drop-shadow(0 0 6px var(--cyan));
+}
+/* Halo drawn as a plain circle: a CSS filter on an SMIL-moved element leaves
+   unrepainted trails in Chromium. */
+.route-runner-halo {
+  fill: var(--cyan);
+  opacity: 0.25;
 }
 .mk {
   position: absolute;
@@ -2944,4 +2974,609 @@ html.theme-liquid *:not(.tt-goo i) {
   .mk.current::before {
     display: none;
   }
+}
+
+/* Hub load / bottleneck forecast (72 h) */
+.hub-low {
+  --hub: var(--green);
+  --hub-soft: var(--green-soft);
+}
+.hub-medium {
+  --hub: var(--amber);
+  --hub-soft: var(--amber-soft);
+}
+.hub-high {
+  --hub: var(--red);
+  --hub-soft: var(--red-soft);
+}
+.map-load .load-halo {
+  fill: var(--hub);
+  fill-opacity: 0.14;
+  stroke: var(--hub);
+  stroke-opacity: 0.28;
+  stroke-width: 1;
+  transition:
+    r 0.35s var(--ease-out),
+    fill 0.3s,
+    fill-opacity 0.3s,
+    stroke 0.3s;
+}
+.map-load .load-ring {
+  fill: none;
+  stroke: var(--hub);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition:
+    r 0.35s var(--ease-out),
+    stroke 0.3s,
+    stroke-dasharray 0.35s var(--ease-out);
+}
+.map-load .hub-high .load-halo {
+  fill-opacity: 0.24;
+}
+.mk-tip small.mk-load {
+  margin-top: 3px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+  color: var(--hub);
+  font-weight: 600;
+}
+.lg-load i {
+  width: 9px;
+  height: 9px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: var(--hub);
+}
+.hub-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.hub-play {
+  flex: none;
+}
+.hub-slider {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.hub-slider input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.hub-when {
+  flex: none;
+  min-width: 200px;
+  display: grid;
+  gap: 2px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.hub-when strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.hub-when small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.hub-when small.hub-high {
+  color: var(--red);
+}
+.hub-card .card-heading {
+  margin-bottom: 12px;
+}
+.hub-regional {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--amber) 32%, transparent);
+  border-radius: var(--r-md);
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 12px;
+}
+.hub-heat {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 14px;
+}
+.hub-heat-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 10px;
+}
+.hub-heat-name {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.hub-heat-cells {
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 2px;
+}
+.hub-cell {
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: var(--hub);
+}
+.hub-heat-now {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: calc(var(--idx) * (100% + 2px) / var(--n));
+  width: calc((100% + 2px) / var(--n) - 2px);
+  outline: 2px solid var(--text);
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 1;
+  transition: left 0.3s var(--ease-out);
+}
+.hoverable .hub-cell:hover,
+.hub-cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.hub-heat-peak {
+  color: var(--hub);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.hub-heat-axis,
+.hub-heat-ticks {
+  color: var(--muted);
+  font-size: 11px;
+}
+.hub-heat-axis > span:last-child {
+  text-align: right;
+}
+.hub-heat-ticks {
+  display: flex;
+  justify-content: space-between;
+}
+.hub-list {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+.hub-item {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--hub);
+  border-radius: var(--r-md);
+  background: var(--card-2);
+}
+.hub-item-main {
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+}
+.hub-item-bar {
+  display: block;
+  height: 3px;
+  width: calc(var(--p) * 100%);
+  border-radius: 2px;
+  background: var(--hub);
+  transform-origin: left;
+}
+.hub-play.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Small, finite motion cues; content is visible without animation. */
+@media (prefers-reduced-motion: no-preference) {
+  .hub-bar, .hub-tick, .clearance-banner {
+    animation: reveal 0.3s var(--ease-out) both;
+  }
+  .hub-heat-row:not(.hub-heat-axis) {
+    animation: fade-in 0.35s ease-out both;
+    animation-delay: calc(var(--r, 0) * 35ms);
+  }
+  .hub-item, .ledger-chip, .issues p, .rule-list li, .stepper li {
+    animation: reveal 0.35s var(--ease-out) both;
+    animation-delay: calc(var(--i, 0) * 45ms);
+  }
+  .hub-item-bar {
+    animation: grow-x 0.65s var(--ease-out) both;
+  }
+  .stepper li > span, .rule-list li b {
+    animation: pop 0.3s var(--ease-out) both;
+    animation-delay: calc(var(--i, 0) * 45ms);
+  }
+  .stepper li, .stepper li > span, .rule-list li, .rule-list li b,
+  .ledger-chip, .hub-cell {
+    transition: color 0.2s, background-color 0.2s, border-color 0.2s, opacity 0.2s;
+  }
+  .toast.closing {
+    animation: toast-out 0.18s ease-in forwards;
+    pointer-events: none;
+  }
+}
+@keyframes toast-out {
+  to { opacity: 0; transform: translateY(8px); }
+}
+.hub-item-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+.hub-item-top b {
+  color: var(--hub);
+  font-variant-numeric: tabular-nums;
+}
+.hub-item-when {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.hub-item-why {
+  color: var(--muted);
+  font-size: 12px;
+}
+.hub-item-ships {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.hub-item-ships small {
+  color: var(--muted);
+  font-size: 12px;
+}
+button.hub-ship {
+  cursor: pointer;
+}
+.hoverable button.hub-ship:hover,
+button.hub-ship:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.hub-note {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+@media (max-width: 720px) {
+  .hub-bar {
+    flex-wrap: wrap;
+    padding: 10px 16px;
+  }
+  .hub-when {
+    min-width: 0;
+    flex: 1 1 100%;
+    text-align: left;
+  }
+  .hub-heat-row {
+    grid-template-columns: 72px minmax(0, 1fr) 40px;
+    gap: 6px;
+  }
+}
+
+/* Narrow centre column (three-column layout at 1280-1440 px, phones):
+   layer toggles become icon-only (title + visible-to-AT name kept). */
+@container ov-center (max-width: 640px) {
+  .tool-group {
+    padding: 10px 14px;
+  }
+  .tool {
+    padding: 0 9px;
+  }
+  .tool-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .hub-bar {
+    flex-wrap: wrap;
+    padding: 10px 14px;
+  }
+  .hub-when {
+    flex: 1 1 100%;
+    min-width: 0;
+    text-align: left;
+  }
+}
+
+/* ---- UX polish: toast, busy spinner, focus ---- */
+.toast-area {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line-2);
+  background: var(--card-2);
+  color: var(--text);
+  font-size: 14px;
+  animation: toast-in 0.22s ease-out;
+}
+.toast button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.toast button:hover {
+  color: var(--text);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+button[data-busy="true"]::after {
+  content: "";
+  display: inline-block;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-left: 8px;
+  vertical-align: -2px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin 0.7s linear infinite;
+}
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+main.stage[aria-busy="true"] button:disabled {
+  cursor: progress;
+}
+.seg button:focus-visible,
+.rail-btn:focus-visible,
+.toast button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+  button[data-busy="true"]::after {
+    animation-duration: 1.6s;
+  }
+}
+
+/* Smart-contract clearance: stepper, rule card, decision banners */
+.stepper {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.stepper li {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--muted);
+  font-size: 13px;
+}
+.stepper li > span {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+.stepper li.done {
+  color: var(--green);
+}
+.stepper li.done > span {
+  background: var(--green-soft);
+  border-color: var(--green);
+}
+.stepper li.current {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.stepper li.current > span {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.rule-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.rule-list li {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.rule-list li.pass b {
+  color: var(--green);
+}
+.rule-list li.fail b {
+  color: var(--red);
+}
+.rule-list li.fail {
+  color: var(--text);
+}
+.clearance-banner {
+  margin-top: 12px;
+  padding: 11px 13px;
+  border-radius: var(--r-md);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.clearance-banner.ok {
+  background: var(--green-soft);
+  border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
+  color: var(--green);
+}
+.clearance-banner.manual {
+  background: var(--amber-soft);
+  border: 1px solid color-mix(in srgb, var(--amber) 32%, transparent);
+  color: var(--amber);
+}
+@media (max-width: 720px) {
+  .stepper {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* Keep toasts above the bottom tab bar. */
+  .toast-area {
+    left: 16px;
+    right: 16px;
+    bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px);
+  }
+}
+
+/* Simulated witness ledger row (Documents → «Журнал действий») */
+.ledger-row {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--card-2);
+}
+.ledger-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.ledger-summary svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--green);
+}
+.ledger-not_anchored .ledger-summary svg,
+.ledger-no_quorum .ledger-summary svg,
+.ledger-disabled .ledger-summary svg {
+  color: var(--amber);
+}
+.ledger-conflict .ledger-summary svg {
+  color: var(--red);
+}
+.ledger-nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.ledger-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.ledger-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.ledger-chip.in_sync {
+  background: var(--green-soft);
+  border-color: color-mix(in srgb, var(--green) 32%, transparent);
+  color: var(--green);
+}
+.ledger-chip.behind {
+  background: var(--amber-soft);
+  border-color: color-mix(in srgb, var(--amber) 32%, transparent);
+  color: var(--amber);
+}
+.ledger-chip.diverged,
+.ledger-chip.invalid_signature {
+  background: var(--red-soft);
+  border-color: color-mix(in srgb, var(--red) 32%, transparent);
+  color: var(--red);
+}
+.ledger-chip.unavailable {
+  border-style: dashed;
+  color: var(--muted);
+}
+.ledger-name {
+  color: var(--text);
+  font-weight: 500;
+}
+.ledger-chip.unavailable .ledger-name {
+  color: var(--muted);
+}
+.ledger-state::before {
+  content: "· ";
+}
+.ledger-quorum {
+  font-weight: 600;
+  color: var(--text);
+}
+.ledger-micro {
+  margin-top: 8px;
 }

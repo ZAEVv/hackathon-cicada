@@ -96,6 +96,10 @@ class Weather(Contract):
     source: Literal["synthetic", "cache", "open-meteo"] = "synthetic"
     observed_at: str = SIMULATION_NOW
     stale: bool = False
+    # True when live weather was requested but unavailable (synthetic stand-in).
+    fallback: bool = False
+    # True when a sea port's wave height is the wind-based estimate, not marine data.
+    wave_estimated: bool = False
 
 
 class Shipment(Contract):
@@ -126,6 +130,7 @@ class Scenario(Contract):
     arrival_delay_hours: float = 0
     queue_extra_hours: float = 0
     wind_mps: float | None = None
+    wave_height_m: float | None = None
     blocked_service_ids: list[str] = Field(default_factory=list)
 
 
@@ -155,7 +160,7 @@ class Leg(Contract):
 class Emissions(Contract):
     total_kg: float
     by_leg_kg: list[float]
-    factor_version: str = "demo-v1"
+    factor_version: str = "v1"
     factors_kg_per_tonne_km: dict[str, float] = Field(
         default_factory=lambda: {"rail": 0.022, "road": 0.105, "sea": 0.016}
     )
@@ -234,20 +239,47 @@ class ValidationResult(Contract):
     issues: list[ValidationIssue]
 
 
+class RuleResult(Contract):
+    rule_id: str
+    passed: bool
+    detail: str
+
+
+class Clearance(Contract):
+    ruleset_id: str
+    ruleset_hash: str
+    decision: Literal["auto_accepted", "manual_review"]
+    results: list[RuleResult]
+
+
+class RuleInfo(Contract):
+    id: str
+    description: str
+    parameters: dict[str, Any]
+
+
+class Ruleset(Contract):
+    id: str
+    ruleset_hash: str
+    rules: list[RuleInfo]
+
+
 class Declaration(Contract):
     id: str
     shipment_id: str
     version: int
-    status: Literal["draft", "validation_failed", "ready", "submitted", "demo_accepted", "needs_revision"]
+    status: Literal["draft", "validation_failed", "ready", "submitted", "auto_accepted", "accepted",
+                    "needs_revision"]
     payload: StoredDeclarationInput
     validation: ValidationResult
     content_hash: str
     updated_at: str = SIMULATION_NOW
     demo_only: bool = True
+    clearance: Clearance | None = None
 
 
 class ReviewRequest(Contract):
-    decision: Literal["demo_accepted", "needs_revision"]
+    decision: Literal["accepted", "needs_revision"]
     comment: _text(1000, multiline=True) = ""
 
 
@@ -262,11 +294,50 @@ class AuditEntry(Contract):
     hash: str
 
 
+LedgerState = Literal["anchored", "not_anchored", "conflict", "no_quorum", "disabled"]
+LedgerReason = Literal["hash_mismatch", "truncated", "chain_deleted", "unanchored_entries",
+                       "quorum_unavailable", "ledger_disabled"]
+
+
+class LedgerCheck(Contract):
+    """Witness-ledger comparison (in-process or networked witness nodes; prototype)."""
+    status: LedgerState
+    reason: LedgerReason | None = None
+    anchored: bool
+    quorum: int
+    nodes_total: int
+    nodes_available: int
+    nodes_in_sync: int
+    attested_sequence: int
+    local_sequence: int
+
+
 class AuditVerification(Contract):
     valid: bool
     entries_checked: int
     first_invalid_sequence: int | None = None
     disclaimer: str = "Hash-chain integrity only; not proof of authenticity or customs approval."
+    ledger: LedgerCheck | None = None
+
+
+class LedgerNode(Contract):
+    node_id: str
+    label: str
+    available: bool
+    last_sequence: int | None = None
+    head_hash: str | None = None
+    signature_valid: bool | None = None
+    in_sync: bool
+    state: Literal["in_sync", "behind", "diverged", "invalid_signature", "unavailable"]
+    # Network mode only: why the node could not be used (no secrets, no addresses).
+    error: Literal["timeout", "unreachable", "rejected", "bad_reply"] | None = None
+
+
+class LedgerStatus(LedgerCheck):
+    shipment_id: str
+    mode: Literal["in_process", "network"] = "in_process"
+    nodes: list[LedgerNode]
+    disclaimer: str
 
 
 class ShipmentDetail(Contract):
@@ -298,3 +369,108 @@ class ModelMetrics(Contract):
     model_mae_hours: float
     roc_auc: float | None = None
     disclaimer: str = "Held-out synthetic history; not validated on real Caspian operations."
+
+
+# --- Hub load / bottleneck forecast (backend/app/hubs.py) --------------------
+class HubPoint(Contract):
+    at: str
+    offset_hours: int = Field(ge=0)
+    utilization: float = Field(ge=0, allow_inf_nan=False)
+    load_tph: float = Field(ge=0, allow_inf_nan=False)
+    capacity_tph: float = Field(gt=0, allow_inf_nan=False)
+    background_tph: float = Field(ge=0, allow_inf_nan=False)
+    shipments_tph: float = Field(ge=0, allow_inf_nan=False)
+    queue_hours: float = Field(ge=0, allow_inf_nan=False)
+    shipment_ids: list[str]
+
+
+class HubSeries(Contract):
+    port_id: str
+    nominal_capacity_tph: float = Field(gt=0)
+    peak_utilization: float = Field(ge=0)
+    peak_at: str
+    max_queue_hours: float = Field(ge=0)
+    status: Literal["ok", "busy", "bottleneck"]
+    bottleneck_count: int = Field(ge=0)
+    points: list[HubPoint]
+
+
+class BottleneckWindow(Contract):
+    port_id: str
+    start_at: str
+    end_at: str
+    start_offset_hours: int = Field(ge=0)
+    end_offset_hours: int = Field(ge=0)
+    peak_at: str
+    peak_utilization: float = Field(ge=0)
+    max_queue_hours: float = Field(ge=0)
+    severity: Literal["medium", "high"]
+    reasons: list[str]
+    shipment_ids: list[str]
+
+
+class HubForecast(Contract):
+    simulation_now: str = SIMULATION_NOW
+    synthetic: bool = True
+    horizon_hours: int
+    step_hours: int
+    bottleneck_threshold: float
+    busy_threshold: float
+    regional_scenario: ScenarioKind
+    focus_shipment_id: str | None = None
+    hubs: list[HubSeries]
+    bottlenecks: list[BottleneckWindow]
+    background_source: str
+    disclaimer: str
+
+
+# --- Corridor summary (GET /api/summary) -------------------------------------
+class SummaryKpi(Contract):
+    value: float
+    previous: float | None = None  # None: the previous equal period is not covered by the history
+    delta: float | None = None  # value - previous, in the KPI's own unit
+    delta_pct: float | None = None  # relative change in percent; None when previous is 0/unknown
+
+
+class SummaryWeek(Contract):
+    week_start: str  # UTC date (YYYY-MM-DD) of the first day of the 7-day bin
+    shipments: int
+    tonnes: float
+
+
+class SummaryModeShare(Contract):
+    mode: Mode
+    tonne_km: float
+    share_pct: float
+
+
+class SummaryShipment(Contract):
+    id: str
+    origin_id: str
+    origin_name: str
+    destination_id: str
+    destination_name: str
+    mass_tonnes: float
+    status: Literal["at_risk", "docs_pending", "attention", "in_transit"]
+
+
+class SummaryKpis(Contract):
+    shipments: SummaryKpi
+    on_time_pct: SummaryKpi
+    avg_delay_hours: SummaryKpi
+    co2e_tonnes: SummaryKpi
+
+
+class CorridorSummary(Contract):
+    simulation_now: str = SIMULATION_NOW
+    synthetic: bool = True
+    weeks: Literal[4, 13]
+    period_start: str
+    period_end: str
+    weekly: list[SummaryWeek]
+    kpis: SummaryKpis
+    mode_split: list[SummaryModeShare]
+    recent_shipments: list[SummaryShipment]
+    co2e_intensity_kg_per_tonne: float
+    methodology: str
+    disclaimer: str

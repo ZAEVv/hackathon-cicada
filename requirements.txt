@@ -5,3 +5,5 @@ pydantic>=2.9,<3
 scikit-learn>=1.5,<2
 numpy>=2,<3
 networkx>=3.3,<4
+# Official Neo4j driver (corridor graph); optional at runtime: without GRAPH_DB_URL the app uses networkx.
+neo4j==5.28.2

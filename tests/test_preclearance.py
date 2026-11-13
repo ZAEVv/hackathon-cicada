@@ -14,8 +14,8 @@ from backend.app.schemas import AuditEntry, AuditVerification, Declaration
 
 
 NOW = "2026-11-12T08:00:00Z"
-BROKER = {"id": "demo-broker", "role": "broker"}
-REVIEWER = {"id": "demo-reviewer", "role": "reviewer"}
+BROKER = {"id": "dev-broker", "role": "broker"}
+REVIEWER = {"id": "dev-reviewer", "role": "reviewer"}
 SHIPMENT = {"id": "SCT-001", "mass_kg": 20000, "container_id": "C1"}
 PAYLOAD = {"shipper": "Exporter", "consignee": "Importer", "description": "Parts",
            "mass_kg": 20000, "value_usd": 100, "origin_country": "RU", "hs_code": "123456",
@@ -101,7 +101,7 @@ def test_roles_and_missing(db):
     with pytest.raises(PermissionError):
         pc.save_declaration(db, SHIPMENT, PAYLOAD, REVIEWER, NOW)
     with pytest.raises(PermissionError):
-        pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "", BROKER, NOW)
+        pc.review_declaration(db, SHIPMENT["id"], "accepted", "", BROKER, NOW)
     with pytest.raises(KeyError):
         pc.validate_declaration(db, SHIPMENT, BROKER, NOW)
     assert pc.get_declaration(db, SHIPMENT["id"]) is None
@@ -127,8 +127,8 @@ def test_replay_review_and_revision(db):
     submitted = pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW)
     with pytest.raises(ValueError):
         pc.save_declaration(db, SHIPMENT, PAYLOAD, BROKER, NOW)
-    accepted = pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "demo", REVIEWER, NOW)
-    assert accepted["status"] == "demo_accepted"
+    accepted = pc.review_declaration(db, SHIPMENT["id"], "accepted", "demo", REVIEWER, NOW)
+    assert accepted["status"] == "accepted"
     count = len(pc.get_audit(db, SHIPMENT["id"]))
     assert pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW) == submitted
     assert len(pc.get_audit(db, SHIPMENT["id"])) == count
@@ -163,12 +163,12 @@ def test_needs_revision_requires_new_version_before_resubmission(db):
     resubmitted = pc.submit_declaration(db, SHIPMENT["id"], new_key, BROKER, NOW)
     assert resubmitted["status"] == "submitted"
     assert pc.get_declaration(db, SHIPMENT["id"]) == resubmitted
-    assert pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "", REVIEWER, NOW)["status"] == "demo_accepted"
+    assert pc.review_declaration(db, SHIPMENT["id"], "accepted", "", REVIEWER, NOW)["status"] == "accepted"
     assert pc.verify_audit(db, SHIPMENT["id"])["valid"]
 
 
 @pytest.mark.parametrize("field,value", [
-    ("status", "demo_accepted"), ("version", 99), ("updated_at", "2099-01-01T00:00:00Z"),
+    ("status", "accepted"), ("version", 99), ("updated_at", "2099-01-01T00:00:00Z"),
 ])
 def test_audit_detects_independent_metadata_tampering(db, field, value):
     ready(db)
@@ -257,6 +257,7 @@ def test_keyed_chain_uses_hmac_and_verifies(db, monkeypatch):
         assert entry["hash"] != sha256_digest(body)
     result = pc.verify_audit(db, SHIPMENT["id"])
     AuditVerification(**result)
+    assert result.pop("ledger")["status"] == "anchored"  # additive field (witness ledger)
     assert result == {"valid": True, "entries_checked": 4, "first_invalid_sequence": None,
                       "disclaimer": "Hash-chain integrity only; not proof of authenticity or customs approval."}
 
@@ -287,28 +288,35 @@ def test_entry_written_under_other_key_is_first_invalid(db, monkeypatch, early, 
     assert pc.verify_audit(db, SHIPMENT["id"])["first_invalid_sequence"] == 1
 
 
-def test_rewritten_history_is_only_detected_in_keyed_mode(db, monkeypatch):
+def test_rewritten_history_is_detected_by_keys_and_witnesses(tmp_path, monkeypatch):
     def mutate(entry):
         entry["actor"] = "someone-else"
 
-    # Unkeyed: a DB writer can re-link the chain (documented limitation).
+    # Unkeyed: a DB writer can re-link the local chain; only the witness
+    # quorum (simulated ledger) catches it.
+    db = str(tmp_path / "unkeyed.sqlite")
+    pc.init_db(db)
     lifecycle(db)
     rewrite_chain_from(db, 2, mutate, sha256_digest)
-    assert pc.verify_audit(db, SHIPMENT["id"])["valid"]
+    result = pc.verify_audit(db, SHIPMENT["id"])
+    assert not result["valid"] and result["first_invalid_sequence"] == 2
+    assert result["ledger"]["reason"] == "hash_mismatch"
 
     # Keyed: without the key the same rewrite fails at the edited entry,
     # whether recomputed as plain SHA-256 or with a guessed key.
-    raw_execute(db, "DELETE FROM audit_entries")
-    raw_execute(db, "DELETE FROM declarations")
-    raw_execute(db, "DELETE FROM submission_keys")
+    db = str(tmp_path / "keyed.sqlite")
+    pc.init_db(db)
     set_key(monkeypatch, KEY1)
     lifecycle(db)
     for forged_digest in (sha256_digest, hmac_digest(KEY2)):
         rewrite_chain_from(db, 2, mutate, forged_digest)
         result = pc.verify_audit(db, SHIPMENT["id"])
         assert not result["valid"] and result["first_invalid_sequence"] == 2
-    rewrite_chain_from(db, 2, mutate, hmac_digest(KEY1))  # only the key holder can
-    assert pc.verify_audit(db, SHIPMENT["id"])["valid"]
+    # Even the key holder cannot rewrite history the witnesses attested.
+    rewrite_chain_from(db, 2, mutate, hmac_digest(KEY1))
+    result = pc.verify_audit(db, SHIPMENT["id"])
+    assert not result["valid"] and result["first_invalid_sequence"] == 2
+    assert result["ledger"]["reason"] == "hash_mismatch"
 
 
 @pytest.mark.parametrize("short", ["x", "short-key", "a" * 15])
@@ -412,7 +420,7 @@ def test_declaration_with_extra_or_duplicate_keys_is_rejected(db):
         pc.get_declaration(db, SHIPMENT["id"])
     # Duplicate key whose last value equals the genuine one: old parser accepted it.
     text = canonical(declaration)
-    write_declaration(db, '{"status":"demo_accepted",' + text[1:])
+    write_declaration(db, '{"status":"accepted",' + text[1:])
     assert not pc.verify_audit(db, SHIPMENT["id"])["valid"]
 
 
@@ -463,7 +471,9 @@ def test_malformed_or_type_confused_entry_is_invalid_not_raised(db, variant):
 def test_deleted_whole_chain_with_declaration_present_is_invalid(db):
     ready(db)
     raw_execute(db, "DELETE FROM audit_entries")
-    assert pc.verify_audit(db, SHIPMENT["id"]) == {
+    result = pc.verify_audit(db, SHIPMENT["id"])
+    assert result.pop("ledger")["reason"] == "chain_deleted"
+    assert result == {
         "valid": False, "entries_checked": 0, "first_invalid_sequence": 1,
         "disclaimer": "Hash-chain integrity only; not proof of authenticity or customs approval."}
 
@@ -474,16 +484,22 @@ def test_deleted_middle_entry_is_invalid(db):
     assert pc.verify_audit(db, SHIPMENT["id"])["first_invalid_sequence"] == 2
 
 
-def test_known_limitation_tail_truncation_with_declaration_rollback(db, monkeypatch):
-    # Documented inherent limitation: without an external anchor, removing the
-    # tail AND restoring a genuine earlier declaration snapshot is undetectable,
-    # even in keyed mode.
+def test_tail_truncation_with_declaration_rollback(db, monkeypatch):
+    # Local checks alone cannot see removing the tail AND restoring a genuine
+    # earlier declaration snapshot, even in keyed mode; the witness quorum can.
     set_key(monkeypatch, KEY1)
     pc.save_declaration(db, SHIPMENT, copy.deepcopy(PAYLOAD), BROKER, NOW)
     snapshot = raw_execute(db, "SELECT declaration_json FROM declarations")[0][0]
     pc.validate_declaration(db, SHIPMENT, BROKER, NOW)
     raw_execute(db, "DELETE FROM audit_entries WHERE sequence = 2")
     write_declaration(db, snapshot)
+    result = pc.verify_audit(db, SHIPMENT["id"])
+    assert not result["valid"] and result["first_invalid_sequence"] == 2
+    assert result["ledger"]["reason"] == "truncated"
+    # Remaining limitation: the simulated nodes share this disk, so a writer
+    # who also truncates every witness file is not detected.
+    for node, _ in pc.ledger.NODES:
+        raw_execute(pc.ledger.witness_path(db, node), "DELETE FROM attestations WHERE sequence = 2")
     assert pc.verify_audit(db, SHIPMENT["id"])["valid"]
 
 
@@ -510,8 +526,8 @@ def test_connections_are_closed_on_success_and_error(db, monkeypatch):
         lambda: pc.validate_declaration(db, SHIPMENT, BROKER, NOW),
         lambda: pc.submit_declaration(db, SHIPMENT["id"], "k", BROKER, NOW),
         lambda: pc.submit_declaration(db, SHIPMENT["id"], "k", BROKER, NOW),  # replay
-        lambda: pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "", REVIEWER, NOW),
-        lambda: pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "", REVIEWER, NOW),  # ValueError
+        lambda: pc.review_declaration(db, SHIPMENT["id"], "accepted", "", REVIEWER, NOW),
+        lambda: pc.review_declaration(db, SHIPMENT["id"], "accepted", "", REVIEWER, NOW),  # ValueError
         lambda: pc.get_audit(db, SHIPMENT["id"]),
         lambda: pc.verify_audit(db, SHIPMENT["id"]),
         lambda: pc.init_db(db),
@@ -645,13 +661,13 @@ def test_input_length_guards(db):
     assert pc.submit_declaration(db, SHIPMENT["id"], "k" * 128, BROKER, NOW)["status"] == "submitted"
 
     with pytest.raises(ValueError, match="^Review comment is too long$"):
-        pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "c" * 1001, REVIEWER, NOW)
+        pc.review_declaration(db, SHIPMENT["id"], "accepted", "c" * 1001, REVIEWER, NOW)
     for bad_comment in (None, 5, "bad\udfff"):
         with pytest.raises(ValueError, match="^Invalid review comment$"):
-            pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", bad_comment, REVIEWER, NOW)
+            pc.review_declaration(db, SHIPMENT["id"], "accepted", bad_comment, REVIEWER, NOW)
     assert pc.get_declaration(db, SHIPMENT["id"])["status"] == "submitted"
-    reviewed = pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "c" * 1000, REVIEWER, NOW)
-    assert reviewed["status"] == "demo_accepted"
+    reviewed = pc.review_declaration(db, SHIPMENT["id"], "accepted", "c" * 1000, REVIEWER, NOW)
+    assert reviewed["status"] == "accepted"
     assert pc.verify_audit(db, SHIPMENT["id"])["valid"]
 
 
@@ -681,7 +697,7 @@ def test_tampered_submission_record_is_never_replayed(db, tamper):
     else:
         response = copy.deepcopy(submitted)
         if tamper == "status":
-            response["status"] = "demo_accepted"
+            response["status"] = "accepted"
         elif tamper == "payload":
             response["payload"]["shipper"] = "Injected"
         elif tamper == "extra_key":
@@ -700,7 +716,77 @@ def test_replay_after_review_returns_original_submission(db):
     # after the declaration moved on; clients read current state via GET.
     ready(db)
     submitted = pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW)
-    pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "ok", REVIEWER, NOW)
+    pc.review_declaration(db, SHIPMENT["id"], "accepted", "ok", REVIEWER, NOW)
     replay = pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW)
     assert replay == submitted and replay["status"] == "submitted"
     Declaration(**replay)
+
+
+TRUSTED = "ООО «Волга Экспорт»"
+
+
+def _trusted_ready(db):
+    payload = copy.deepcopy(PAYLOAD)
+    payload.update(shipper=TRUSTED, value_usd=45000)
+    pc.save_declaration(db, SHIPMENT, payload, BROKER, NOW)
+    return pc.validate_declaration(db, SHIPMENT, BROKER, NOW)
+
+
+def test_ruleset_hash_is_stable_and_covers_parameters(monkeypatch):
+    first = pc.ruleset_hash()
+    assert first == pc.ruleset_hash() and len(first) == 64
+    monkeypatch.setattr(pc, "TRUSTED_SHIPPERS", ("Someone Else",))
+    monkeypatch.setattr(pc, "_RULES", tuple(
+        (rid, desc, {"trusted_shippers": ["Someone Else"]} if rid == "R4" else params, check, fail)
+        for rid, desc, params, check, fail in pc._RULES))
+    assert pc.ruleset_hash() != first
+
+
+def test_evaluate_ruleset_is_deterministic_and_never_echoes_input():
+    payload = copy.deepcopy(PAYLOAD)
+    payload["shipper"] = "SECRET-MARKER"
+    result = pc.evaluate_ruleset(payload, SHIPMENT)
+    assert result == pc.evaluate_ruleset(payload, SHIPMENT)
+    assert result["decision"] == "manual_review" and "SECRET-MARKER" not in json.dumps(result)
+    payload["mass_kg"] = 0
+    assert not next(r for r in pc.evaluate_ruleset(payload, SHIPMENT)["results"] if r["rule_id"] == "R3")["passed"]
+
+
+def test_auto_accept_audit_valid_replay_and_tamper_detection(db):
+    _trusted_ready(db)
+    submitted = pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW, SHIPMENT)
+    assert submitted["status"] == "auto_accepted" and submitted["clearance"]["decision"] == "auto_accepted"
+    Declaration(**submitted)
+    audit = pc.get_audit(db, SHIPMENT["id"])
+    assert audit[-1]["action"] == "submit" and audit[-1]["payload"]["status"] == "auto_accepted"
+    assert audit[-1]["payload"]["clearance"]["ruleset_hash"] == pc.ruleset_hash()
+    for entry in audit:
+        AuditEntry(**entry)
+    assert pc.verify_audit(db, SHIPMENT["id"])["valid"]
+    assert pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW, SHIPMENT) == submitted
+    assert len(pc.get_audit(db, SHIPMENT["id"])) == len(audit)
+    with pytest.raises(ValueError):
+        pc.review_declaration(db, SHIPMENT["id"], "accepted", "", REVIEWER, NOW)
+    # Editing the stored clearance on the declaration row is detected.
+    declaration = read_declaration(db)
+    declaration["clearance"]["results"][0]["passed"] = False
+    write_declaration(db, declaration)
+    assert not pc.verify_audit(db, SHIPMENT["id"])["valid"]
+
+
+def test_tampered_submit_clearance_entry_is_detected(db):
+    _trusted_ready(db)
+    pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW, SHIPMENT)
+    entry = raw_entries(db)[-1]
+    entry["payload"]["clearance"]["results"][3]["passed"] = False
+    write_entry_text(db, entry["sequence"], canonical(entry))
+    result = pc.verify_audit(db, SHIPMENT["id"])
+    assert not result["valid"] and result["first_invalid_sequence"] == entry["sequence"]
+
+
+def test_untrusted_shipper_stays_submitted_and_reviewable(db):
+    ready(db)
+    submitted = pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW, SHIPMENT)
+    assert submitted["status"] == "submitted" and submitted["clearance"]["decision"] == "manual_review"
+    assert pc.review_declaration(db, SHIPMENT["id"], "accepted", "", REVIEWER, NOW)["status"] == "accepted"
+    assert pc.verify_audit(db, SHIPMENT["id"])["valid"]

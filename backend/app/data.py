@@ -5,8 +5,10 @@ coordinates are not claims about real Caspian logistics schedules or availabilit
 The synthetic clock is fixed in the frozen contracts; no wall-clock time or network
 I/O is used unless ``get_weather(..., use_live=True)`` is explicitly requested.
 
-The live path (off by default, not reachable from the HTTP API, which only calls
-``get_weather(port_id)`` with catalog port ids) accepts only a 200 response whose
+The HTTP API takes current weather from ``weather.WeatherService`` (batched
+Open-Meteo forecast + marine requests with an in-memory TTL cache, falling back
+to the synthetic table below).  The single-port live path here
+(``use_live=True``, not used by the API) accepts only a 200 response whose
 final URL is still ``https://api.open-meteo.com/v1/forecast``, reads at most
 ``MAX_RESPONSE_BYTES``, and applies plausibility bounds to fetched and cached
 values.  ``cache_path`` is trusted caller configuration; the cache is read only
@@ -96,6 +98,30 @@ _PORTS: list[dict[str, Any]] = [
         "lat": 35.69,
         "lon": 51.39,
         "kind": "destination",
+    },
+    {
+        "id": "aktau",
+        "name": "Aktau Sea Port",
+        "country": "KZ",
+        "lat": 43.65,
+        "lon": 51.17,
+        "kind": "port",
+    },
+    {
+        "id": "turkmenbashi",
+        "name": "Turkmenbashi Sea Port",
+        "country": "TM",
+        "lat": 40.02,
+        "lon": 52.97,
+        "kind": "port",
+    },
+    {
+        "id": "amirabad",
+        "name": "Amirabad Port",
+        "country": "IR",
+        "lat": 36.85,
+        "lon": 53.37,
+        "kind": "port",
     },
 ]
 
@@ -222,6 +248,93 @@ _SERVICES: list[dict[str, Any]] = [
         "cost_usd": 600.0,
         "allowed_cargo": ["general"],
     },
+    {
+        "id": "rail-east",
+        "origin_id": "rail_hub",
+        "destination_id": "aktau",
+        "mode": "rail",
+        "distance_km": 1150.0,
+        "duration_hours": 34.0,
+        # Eastern branch: Astrakhan -> Aktau via Kazakhstan (illustrative).
+        "departures": _daily_departures(8),
+        "cutoff_hours": 6.0,
+        "handling_hours": 2.0,
+        "capacity_tonnes": 80.0,
+        "cost_usd": 1500.0,
+        "allowed_cargo": ["general"],
+    },
+    {
+        "id": "sea-aktau",
+        "origin_id": "aktau",
+        "destination_id": "amirabad",
+        "mode": "sea",
+        "distance_km": 820.0,
+        "duration_hours": 40.0,
+        "departures": _daily_departures(9),
+        "cutoff_hours": 4.0,
+        "handling_hours": 1.0,
+        "capacity_tonnes": 60.0,
+        "cost_usd": 1400.0,
+        "allowed_cargo": ["general"],
+    },
+    {
+        "id": "rail-kz-tm",
+        "origin_id": "aktau",
+        "destination_id": "turkmenbashi",
+        "mode": "rail",
+        "distance_km": 700.0,
+        "duration_hours": 28.0,
+        # Eastern land route Aktau -> Turkmenbashi (illustrative).
+        "departures": _daily_departures(18),
+        "cutoff_hours": 4.0,
+        "handling_hours": 1.0,
+        "capacity_tonnes": 60.0,
+        "cost_usd": 1100.0,
+        "allowed_cargo": ["general"],
+    },
+    {
+        "id": "sea-tkm",
+        "origin_id": "turkmenbashi",
+        "destination_id": "amirabad",
+        "mode": "sea",
+        "distance_km": 330.0,
+        "duration_hours": 18.0,
+        "departures": _daily_departures(2),
+        "cutoff_hours": 2.0,
+        "handling_hours": 1.0,
+        "capacity_tonnes": 50.0,
+        "cost_usd": 800.0,
+        "allowed_cargo": ["general"],
+    },
+    {
+        "id": "sea-mak-amirabad",
+        "origin_id": "makhachkala",
+        "destination_id": "amirabad",
+        "mode": "sea",
+        "distance_km": 950.0,
+        "duration_hours": 44.0,
+        # Eastern sea alternative when sea-main is blocked.
+        "departures": _daily_departures(20),
+        "cutoff_hours": 4.0,
+        "handling_hours": 1.0,
+        "capacity_tonnes": 60.0,
+        "cost_usd": 1500.0,
+        "allowed_cargo": ["general"],
+    },
+    {
+        "id": "rail-amirabad",
+        "origin_id": "amirabad",
+        "destination_id": "tehran",
+        "mode": "rail",
+        "distance_km": 320.0,
+        "duration_hours": 10.0,
+        "departures": _interval_departures(12),
+        "cutoff_hours": 1.0,
+        "handling_hours": 1.0,
+        "capacity_tonnes": 60.0,
+        "cost_usd": 700.0,
+        "allowed_cargo": ["general"],
+    },
 ]
 
 
@@ -251,8 +364,8 @@ def _event(
 _SHIPMENTS: list[dict[str, Any]] = [
     {
         "id": "SCT-001",
-        "reference": "North-South demo 001",
-        "container_id": "DEMO0000001",
+        "reference": "North–South 001",
+        "container_id": "CSPU0000013",
         "cargo": "general",
         "mass_kg": 20000.0,
         "origin_id": "rail_hub",
@@ -301,8 +414,8 @@ _SHIPMENTS: list[dict[str, Any]] = [
     },
     {
         "id": "SCT-002",
-        "reference": "Olya transfer demo 002",
-        "container_id": "DEMO0000002",
+        "reference": "Olya transfer 002",
+        "container_id": "CSPU0000029",
         "cargo": "general",
         "mass_kg": 20000.0,
         "origin_id": "rail_hub",
@@ -318,7 +431,7 @@ _SHIPMENTS: list[dict[str, Any]] = [
             "road-final",
         ],
         "queue_hours": 1.0,
-        "observed_delay_hours": 0.5,
+        "observed_delay_hours": 1.5,
         "documents_ready_at": "2026-11-12T17:00:00Z",
         "events": [
             _event(
@@ -334,7 +447,7 @@ _SHIPMENTS: list[dict[str, Any]] = [
                 "port_arrival",
                 "makhachkala",
                 "2026-11-12T15:00:00Z",
-                estimated_at="2026-11-12T15:30:00Z",
+                estimated_at="2026-11-12T16:30:00Z",
                 quality_flag="forecast",
             ),
             _event(
@@ -356,8 +469,8 @@ _SHIPMENTS: list[dict[str, Any]] = [
     },
     {
         "id": "SCT-003",
-        "reference": "Olya feeder demo 003",
-        "container_id": "DEMO0000003",
+        "reference": "Olya feeder 003",
+        "container_id": "CSPU0000034",
         "cargo": "general",
         "mass_kg": 20000.0,
         "origin_id": "rail_hub",
@@ -373,7 +486,7 @@ _SHIPMENTS: list[dict[str, Any]] = [
             "road-final",
         ],
         "queue_hours": 0.5,
-        "observed_delay_hours": 0.0,
+        "observed_delay_hours": 1.0,
         "documents_ready_at": "2026-11-13T09:00:00Z",
         "events": [
             _event(
@@ -389,7 +502,7 @@ _SHIPMENTS: list[dict[str, Any]] = [
                 "port_arrival",
                 "makhachkala",
                 "2026-11-13T08:00:00Z",
-                estimated_at="2026-11-13T08:20:00Z",
+                estimated_at="2026-11-13T09:00:00Z",
                 quality_flag="forecast",
             ),
             _event(
@@ -409,6 +522,160 @@ _SHIPMENTS: list[dict[str, Any]] = [
             ),
         ],
     },
+    {
+        "id": "SCT-004",
+        "reference": "Eastern line 004",
+        "container_id": "CSPU0000040",
+        "cargo": "general",
+        "mass_kg": 20000.0,
+        "origin_id": "rail_hub",
+        "destination_id": "tehran",
+        "current_location_id": "aktau",
+        "status": "in_transit",
+        "planned_port_arrival": "2026-11-12T18:00:00Z",
+        "planned_delivery_at": "2026-11-15T22:00:00Z",
+        "planned_service_ids": [
+            "rail-east",
+            "sea-aktau",
+            "rail-amirabad",
+        ],
+        "queue_hours": 1.5,
+        "observed_delay_hours": 0.0,
+        "documents_ready_at": "2026-11-12T21:00:00Z",
+        "events": [
+            _event(
+                "evt-004-1",
+                "rail_departure",
+                "rail_hub",
+                "2026-11-11T08:00:00Z",
+                actual_at="2026-11-11T08:20:00Z",
+                quality_flag="observed",
+            ),
+            _event(
+                "evt-004-2",
+                "port_arrival",
+                "aktau",
+                "2026-11-12T18:00:00Z",
+                estimated_at="2026-11-12T18:30:00Z",
+                quality_flag="forecast",
+            ),
+            _event(
+                "evt-004-3",
+                "sea_departure",
+                "aktau",
+                "2026-11-13T09:00:00Z",
+                estimated_at="2026-11-13T09:00:00Z",
+                quality_flag="forecast",
+            ),
+            _event(
+                "evt-004-4",
+                "delivery",
+                "tehran",
+                "2026-11-15T22:00:00Z",
+                quality_flag="forecast",
+            ),
+        ],
+    },
+    {
+        "id": "SCT-005",
+        "reference": "Amirabad sea 005",
+        "container_id": "CSPU0000055",
+        "cargo": "general",
+        "mass_kg": 20000.0,
+        "origin_id": "makhachkala",
+        "destination_id": "tehran",
+        "current_location_id": "makhachkala",
+        "status": "in_transit",
+        "planned_port_arrival": "2026-11-12T12:00:00Z",
+        "planned_delivery_at": "2026-11-15T10:00:00Z",
+        "planned_service_ids": [
+            "sea-mak-amirabad",
+            "rail-amirabad",
+        ],
+        "queue_hours": 0.5,
+        "observed_delay_hours": 0.0,
+        "documents_ready_at": "2026-11-12T13:00:00Z",
+        "events": [
+            _event(
+                "evt-005-1",
+                "port_arrival",
+                "makhachkala",
+                "2026-11-12T12:00:00Z",
+                estimated_at="2026-11-12T12:30:00Z",
+                quality_flag="forecast",
+            ),
+            _event(
+                "evt-005-2",
+                "sea_departure",
+                "makhachkala",
+                "2026-11-12T20:00:00Z",
+                estimated_at="2026-11-12T20:00:00Z",
+                quality_flag="forecast",
+            ),
+            _event(
+                "evt-005-3",
+                "delivery",
+                "tehran",
+                "2026-11-15T10:00:00Z",
+                quality_flag="forecast",
+            ),
+        ],
+    },
+    {
+        "id": "SCT-006",
+        "reference": "Turkmenbashi variant 006",
+        "container_id": "CSPU0000060",
+        "cargo": "general",
+        "mass_kg": 20000.0,
+        "origin_id": "rail_hub",
+        "destination_id": "tehran",
+        "current_location_id": "aktau",
+        "status": "in_transit",
+        "planned_port_arrival": "2026-11-12T10:00:00Z",
+        "planned_delivery_at": "2026-11-15T10:00:00Z",
+        "planned_service_ids": [
+            "rail-east",
+            "rail-kz-tm",
+            "sea-tkm",
+            "rail-amirabad",
+        ],
+        "queue_hours": 0.5,
+        "observed_delay_hours": 3.0,
+        "documents_ready_at": "2026-11-12T11:00:00Z",
+        "events": [
+            _event(
+                "evt-006-1",
+                "rail_departure",
+                "rail_hub",
+                "2026-11-11T08:00:00Z",
+                actual_at="2026-11-11T08:15:00Z",
+                quality_flag="observed",
+            ),
+            _event(
+                "evt-006-2",
+                "port_arrival",
+                "aktau",
+                "2026-11-12T10:00:00Z",
+                estimated_at="2026-11-12T10:20:00Z",
+                quality_flag="forecast",
+            ),
+            _event(
+                "evt-006-3",
+                "rail_departure",
+                "aktau",
+                "2026-11-12T18:00:00Z",
+                estimated_at="2026-11-12T18:00:00Z",
+                quality_flag="forecast",
+            ),
+            _event(
+                "evt-006-4",
+                "delivery",
+                "tehran",
+                "2026-11-15T10:00:00Z",
+                quality_flag="forecast",
+            ),
+        ],
+    },
 ]
 
 
@@ -421,6 +688,19 @@ def _finite_number(value: Any) -> bool:
         return False
 
 
+def estimate_wave_height_m(wind_mps: float) -> float:
+    """Documented fallback sea-state estimate (significant wave height, m) from wind.
+
+    Used wherever no wave height is available (Open-Meteo forecast has no marine
+    data).  A crude fetch-limited Caspian rule of thumb: Hs ~ 0.2 + 0.009 * wind^2,
+    i.e. ~0.3-0.8 m for calm winds (3-7 m/s), ~2.2 m at 15 m/s and ~4.6 m in a
+    22 m/s storm, capped at 8 m.  Deterministic and monotonic in wind.
+    """
+
+    wind = max(0.0, float(wind_mps))
+    return round(min(8.0, 0.2 + 0.009 * wind * wind), 2)
+
+
 def _delay_hours(
     *,
     is_storm: bool,
@@ -430,12 +710,16 @@ def _delay_hours(
     observed_delay_hours: float,
     mass_tonnes: float,
     rng: random.Random,
+    wave_height_m: float = 0.0,
 ) -> float:
     """Nonlinear synthetic delay surface used by the seeded history.
 
     Normal, low-wind rows stay near zero.  Wind and precipitation are superlinear,
     congestion interacts with wind, and storm rows receive an additional penalty.
-    The noise is seeded and small relative to the weather effect.
+    The seeded noise is heteroscedastic: operations get less predictable as wind
+    and the terminal queue grow (and more so in a storm).  Unobserved incidents
+    (crane breakdowns, inspections, crew variance) are added separately by
+    ``_unobserved_delay_hours`` so this surface stays a function of model inputs.
     """
 
     base = (
@@ -445,7 +729,9 @@ def _delay_hours(
         + 0.10 * observed_delay_hours
     )
     wind_excess = max(0.0, wind_mps - 9.0)
-    weather = 0.035 * wind_excess**1.8 + 0.06 * precipitation_mm**1.35
+    # Sea-state penalty: nothing below ~1.7 m, then superlinear (ferries slow/hold).
+    sea_state = 0.45 * max(0.0, wave_height_m - 1.7) ** 1.5
+    weather = 0.035 * wind_excess**1.8 + 0.06 * precipitation_mm**1.35 + sea_state
     wind_queue_interaction = (
         0.009 * queue_hours * max(0.0, wind_mps - 8.0) ** 1.35
     )
@@ -453,7 +739,7 @@ def _delay_hours(
     storm_extra = 0.0
     if is_storm:
         storm_extra = 5.0 + 0.12 * max(0.0, wind_mps - 18.0) ** 1.2
-    sigma = 1.15 if is_storm else (0.65 if queue_hours > 5.0 else 0.35)
+    sigma = (0.25 + 0.035 * wind_mps + 0.06 * queue_hours) * (1.5 if is_storm else 1.0)
     value = (
         base
         + weather
@@ -463,6 +749,63 @@ def _delay_hours(
         + rng.gauss(0.0, sigma)
     )
     return round(max(0.0, value), 3)
+
+
+# Unobserved operational factors.  None of these are history columns or model
+# features, so they cap how well any model can do -- as on a real terminal.
+CRANE_BREAKDOWN_BASE_P = 0.04      # per handling; +1 pp per queue hour (wear, overtime)
+CRANE_BREAKDOWN_HOURS = (2.0, 9.0)
+INSPECTION_P = 0.12                # selective customs/phytosanitary inspection
+INSPECTION_GAMMA = (2.0, 0.9)      # shape, scale: mean 1.8 h, long right tail
+CREW_SIGMA_HOURS = 0.4             # shift handover, gang size, paperwork speed
+# The vessel's actual cargo cutoff also moves (late/early departure, berth
+# reshuffles).  It only affects whether the connection is missed.
+DEPARTURE_SLIP_SIGMA_HOURS = 2.0
+VESSEL_HELD_P, VESSEL_HELD_HOURS = 0.08, (2.0, 8.0)
+EARLY_CLOSE_P, EARLY_CLOSE_HOURS = 0.05, (1.0, 3.0)
+
+
+# Planner's buffer on top of the fair-weather plan, hours, per regime.
+BUFFER_HOURS = {
+    "storm": (-1.0, 5.0),
+    "congestion": (-0.5, 6.0),
+    "breezy": (0.0, 8.0),
+    "normal": (0.0, 10.0),
+}
+PLANNER_MAX_WIND_MPS = 10.0
+
+
+class _NoNoise(random.Random):
+    """A Random whose Gaussian draws are 0: the noise-free expected surface."""
+
+    def gauss(self, mu: float = 0.0, sigma: float = 1.0) -> float:  # noqa: ARG002
+        return mu
+
+
+_NO_NOISE = _NoNoise(0)
+
+
+def _unobserved_delay_hours(rng: random.Random, *, queue_hours: float) -> float:
+    """Extra delay from factors the model never sees (seeded, nonnegative mean)."""
+
+    extra = rng.gauss(0.0, CREW_SIGMA_HOURS)
+    if rng.random() < CRANE_BREAKDOWN_BASE_P + 0.01 * queue_hours:
+        extra += rng.uniform(*CRANE_BREAKDOWN_HOURS)
+    if rng.random() < INSPECTION_P:
+        extra += rng.gammavariate(*INSPECTION_GAMMA)
+    return extra
+
+
+def _departure_slip_hours(rng: random.Random) -> float:
+    """Shift of the real cutoff against the planned one (+ = more time)."""
+
+    slip = rng.gauss(0.0, DEPARTURE_SLIP_SIGMA_HOURS)
+    roll = rng.random()
+    if roll < VESSEL_HELD_P:
+        slip += rng.uniform(*VESSEL_HELD_HOURS)
+    elif roll < VESSEL_HELD_P + EARLY_CLOSE_P:
+        slip -= rng.uniform(*EARLY_CLOSE_HOURS)
+    return slip
 
 
 def _build_history(seed: int) -> list[dict[str, Any]]:
@@ -487,14 +830,14 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
             precipitation_mm = round(rng.uniform(4.0, 30.0), 1)
             queue_hours = round(rng.uniform(3.0, 12.0), 2)
             observed_delay_hours = round(rng.uniform(1.0, 6.0), 2)
-            hours_to_cutoff = round(rng.uniform(1.5, 8.0), 2)
+            buffer_hours = rng.uniform(*BUFFER_HOURS['storm'])
         elif roll < 0.22:
             regime = "congestion"
             wind_mps = round(rng.uniform(2.0, 9.0), 1)
             precipitation_mm = round(rng.uniform(0.0, 3.0), 1)
             queue_hours = round(rng.uniform(5.0, 14.0), 2)
             observed_delay_hours = round(rng.uniform(0.5, 4.0), 2)
-            hours_to_cutoff = round(rng.uniform(1.5, 18.0), 2)
+            buffer_hours = rng.uniform(*BUFFER_HOURS['congestion'])
         elif roll < 0.32:
             # Breezy/rainy but non-storm rows give the weather surface useful
             # intermediate values instead of a synthetic low/high-only gap.
@@ -503,7 +846,7 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
             precipitation_mm = round(rng.uniform(0.0, 8.0), 1)
             queue_hours = round(rng.uniform(1.0, 5.0), 2)
             observed_delay_hours = round(rng.uniform(0.0, 2.0), 2)
-            hours_to_cutoff = round(rng.uniform(4.0, 30.0), 2)
+            buffer_hours = rng.uniform(*BUFFER_HOURS['breezy'])
         else:
             regime = "normal"
             wind_mps = round(rng.uniform(1.0, 8.5), 1)
@@ -512,9 +855,36 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
             )
             queue_hours = round(rng.uniform(0.0, 3.5), 2)
             observed_delay_hours = round(rng.uniform(0.0, 1.5), 2)
-            hours_to_cutoff = round(rng.uniform(2.0, 72.0), 2)
+            buffer_hours = rng.uniform(*BUFFER_HOURS['normal'])
 
         mass_tonnes = round(rng.uniform(5.0, 35.0), 1)
+        # Seeded sea state correlated with wind (drawn after all other fields so
+        # the existing draw order is untouched).
+        wave_height_m = round(
+            min(
+                MAX_WAVE_HEIGHT_M,
+                max(0.1, estimate_wave_height_m(wind_mps) * rng.uniform(0.7, 1.3)),
+            ),
+            2,
+        )
+        # The booking was made days ahead on a fair-weather plan: the planner
+        # expects the noise-free delay for the current queue but at most a
+        # moderate wind, no rain and no storm, then adds a buffer.  Storms and
+        # incidents are therefore what breaks connections.
+        planned_wind = min(wind_mps, PLANNER_MAX_WIND_MPS)
+        planned_delay = _delay_hours(
+            is_storm=False,
+            queue_hours=queue_hours,
+            wind_mps=planned_wind,
+            precipitation_mm=0.0,
+            observed_delay_hours=observed_delay_hours,
+            mass_tonnes=mass_tonnes,
+            rng=_NO_NOISE,
+            wave_height_m=min(wave_height_m, estimate_wave_height_m(planned_wind)),
+        )
+        hours_to_cutoff = round(
+            max(1.0, queue_hours + planned_delay + buffer_hours), 2
+        )
         delay_hours = _delay_hours(
             is_storm=regime == "storm",
             queue_hours=queue_hours,
@@ -523,9 +893,16 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
             observed_delay_hours=observed_delay_hours,
             mass_tonnes=mass_tonnes,
             rng=rng,
+            wave_height_m=wave_height_m,
         )
+        delay_hours = round(
+            max(0.0, delay_hours + _unobserved_delay_hours(rng, queue_hours=queue_hours)), 3
+        )
+        # hours_to_cutoff is the planned slack the model sees; the label uses the
+        # real (slipped) cutoff, which is not known in advance.
         missed_connection = int(
-            observed_delay_hours + queue_hours + delay_hours > hours_to_cutoff
+            observed_delay_hours + queue_hours + delay_hours
+            > hours_to_cutoff + _departure_slip_hours(rng)
         )
         rows.append(
             {
@@ -533,6 +910,7 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
                 "observed_at": observed_at,
                 "queue_hours": queue_hours,
                 "wind_mps": wind_mps,
+                "wave_height_m": wave_height_m,
                 "precipitation_mm": precipitation_mm,
                 "observed_delay_hours": observed_delay_hours,
                 "mass_tonnes": mass_tonnes,
@@ -549,7 +927,7 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
 def load_demo_data(seed: int = SEED) -> dict[str, Any]:
     """Return the frozen catalog, demo shipments and seeded history.
 
-    The catalog and three shipments are stable across seeds.  Only the synthetic
+    The catalog and the demo shipments are stable across seeds.  Only the synthetic
     history depends on ``seed``, and repeated calls with the same seed are
     byte-equivalent.  Returned nested values are copies so callers cannot mutate
     the module-level catalog.
@@ -571,8 +949,22 @@ _SYNTHETIC_WEATHER: dict[str, dict[str, float]] = {
     "olya": {"wind_mps": 7.0, "precipitation_mm": 0.2},
     "anzali": {"wind_mps": 5.0, "precipitation_mm": 0.0},
     "tehran": {"wind_mps": 3.0, "precipitation_mm": 0.0},
+    "aktau": {"wind_mps": 8.0, "precipitation_mm": 0.0},
+    "turkmenbashi": {"wind_mps": 7.0, "precipitation_mm": 0.1},
+    "amirabad": {"wind_mps": 5.0, "precipitation_mm": 0.3},
 }
 _PORT_BY_ID = {port["id"]: port for port in _PORTS}
+
+
+# Synthetic sea state per port (m), consistent with the wind above.  Inland nodes
+# have no sea state.  Ports missing here fall back to estimate_wave_height_m(wind).
+_SYNTHETIC_WAVE_M: dict[str, float] = {
+    "rail_hub": 0.0,
+    "makhachkala": 0.5,
+    "olya": 0.6,
+    "anzali": 0.4,
+    "tehran": 0.0,
+}
 
 
 def _synthetic_weather(port_id: str) -> dict[str, Any]:
@@ -580,7 +972,9 @@ def _synthetic_weather(port_id: str) -> dict[str, Any]:
     return {
         "wind_mps": values["wind_mps"],
         "precipitation_mm": values["precipitation_mm"],
-        "wave_height_m": None,
+        "wave_height_m": _SYNTHETIC_WAVE_M.get(
+            port_id, estimate_wave_height_m(values["wind_mps"])
+        ),
         "source": "synthetic",
         "observed_at": SIMULATION_NOW,
         "stale": False,

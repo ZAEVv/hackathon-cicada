@@ -7,38 +7,46 @@ import hmac
 import logging
 import os
 from threading import RLock
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from . import data, preclearance, predictive, routing, security
+from . import data, graphdb, hubs, ledger, preclearance, predictive, routing, security, summary, weather
 from .schemas import (
-    SIMULATION_NOW, AuditEntry, AuditVerification, ChooseRouteRequest,
-    Dashboard, Declaration, DeclarationInput, IdempotencyKey, ModelMetrics,
+    SIMULATION_NOW, CorridorSummary, AuditEntry, AuditVerification, ChooseRouteRequest,
+    Dashboard, Declaration, Ruleset, DeclarationInput, IdempotencyKey, ModelMetrics,
     ReviewRequest, ScenarioRequest, ShipmentDetail, ShipmentId,
 )
+from .schemas import HubForecast
+from .schemas import LedgerStatus
 
 logger = logging.getLogger("sct")
 
 TRUTHY = frozenset({"1", "true", "yes"})
-TOKEN_ENV = {"broker": "DEMO_BROKER_TOKEN", "reviewer": "DEMO_REVIEWER_TOKEN"}
-DEFAULT_TOKENS = {"broker": "demo-broker-token", "reviewer": "demo-reviewer-token"}
-USERS = {"broker": {"id": "demo-broker", "role": "broker"},
-         "reviewer": {"id": "demo-reviewer", "role": "reviewer"}}
+TOKEN_ENV = {"broker": "BROKER_TOKEN", "reviewer": "REVIEWER_TOKEN"}
+DEFAULT_TOKENS = {"broker": "dev-broker-token", "reviewer": "dev-reviewer-token"}
+USERS = {"broker": {"id": "dev-broker", "role": "broker"},
+         "reviewer": {"id": "dev-reviewer", "role": "reviewer"}}
 # Transport peers allowed to use the built-in demo tokens. "testclient" is the
 # peer name Starlette's TestClient reports.
 LOOPBACK_PEERS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
 FORWARDING_HEADERS = ("forwarded", "x-forwarded-for", "x-real-ip")
 MAX_AUTHORIZATION_LENGTH = 512
-AUTH_REQUIRED = "Valid demo bearer token required"
+AUTH_REQUIRED = "Valid bearer token required"
+DEPARTURE_EVENT_MODES = {"sea_departure": "sea", "rail_departure": "rail", "road_departure": "road"}
+
+
+def _env(name: str) -> str:
+    """Read NAME, falling back to the legacy DEMO_-prefixed variable."""
+    return (os.getenv(name) or os.getenv("DEMO_" + name) or "").strip()
 
 
 def _truthy(name: str) -> bool:
-    return (os.getenv(name) or "").strip().lower() in TRUTHY
+    return _env(name).lower() in TRUTHY
 
 
 def _digest(value: str) -> bytes:
@@ -51,13 +59,13 @@ def _configured_tokens() -> dict[str, tuple[str, bool]]:
     """{role: (token, is_builtin_default)}, read from the environment on every call."""
     tokens = {}
     for role, env in TOKEN_ENV.items():
-        value = (os.getenv(env) or "").strip()
+        value = _env(env)
         tokens[role] = (value, False) if value else (DEFAULT_TOKENS[role], True)
     return tokens
 
 
 def _defaults_allowed(request: Request) -> bool:
-    if _truthy("DEMO_DISABLE_DEFAULT_TOKENS"):
+    if _truthy("DISABLE_DEFAULT_TOKENS"):
         return False
     if request.client is None or request.client.host not in LOOPBACK_PEERS:
         return False
@@ -111,12 +119,24 @@ def create_app(db_path: str | None = None) -> FastAPI:
         app.state.model, app.state.metrics = predictive.train_model(app.state.catalog["history"])
         app.state.shipments = {s["id"]: s for s in app.state.catalog["shipments"]}
         app.state.scenarios = {}
+        # WEATHER_PROVIDER=open-meteo|synthetic; live data is cached in memory (TTL)
+        # and every failure falls back to synthetic weather, marked as such.
+        app.state.weather = weather.WeatherService(app.state.catalog["ports"])
+        app.state.weather.warm()
         app.state.selected = {}
         preclearance.init_db(app.state.db)
-        yield
+        ledger.init_witnesses(app.state.db)  # simulated in-process witness nodes
+        # Corridor topology: Neo4j when GRAPH_DB_URL is set and reachable, else networkx.
+        app.state.topology = graphdb.connect(app.state.catalog["ports"], app.state.catalog["services"])
+        try:
+            yield
+        finally:
+            close = getattr(app.state.topology, "close", None)
+            if close:
+                close()
 
     docs = _truthy("ENABLE_API_DOCS")
-    app = FastAPI(title="Smart Caspian Transit — synthetic demo", lifespan=lifespan,
+    app = FastAPI(title="Smart Caspian Transit API", lifespan=lifespan,
                   docs_url="/docs" if docs else None, redoc_url="/redoc" if docs else None,
                   openapi_url="/openapi.json" if docs else None)
     origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -179,21 +199,22 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def detail(shipment_id):
         item = shipment(shipment_id)
         declaration = preclearance.get_declaration(app.state.db, shipment_id)
-        if declaration and declaration["status"] not in {"ready", "submitted", "demo_accepted"}:
+        if declaration and declaration["status"] not in {"ready", "submitted", "auto_accepted", "accepted"}:
             original = datetime.fromisoformat(item["documents_ready_at"].replace("Z", "+00:00"))
             delayed = datetime.fromisoformat(SIMULATION_NOW.replace("Z", "+00:00")) + timedelta(hours=12)
             item["documents_ready_at"] = max(original, delayed).isoformat().replace("+00:00", "Z")
         profile = routing.scenario_profile(app.state.scenarios.get(shipment_id, "none"))
-        weather = data.get_weather(item["current_location_id"])
+        conditions = app.state.weather.get(item["current_location_id"])
         # The cutoff comes from the original plan (not the document-delayed copy),
         # i.e. the same departure the route baseline below is measured against.
         cutoff = routing.planned_cutoff(shipment(shipment_id), app.state.catalog["services"], SIMULATION_NOW)
-        forecast = predictive.predict(app.state.model, item, weather, profile, SIMULATION_NOW, cutoff=cutoff)
+        forecast = predictive.predict(app.state.model, item, conditions, profile, SIMULATION_NOW, cutoff=cutoff)
         # Keep the original document-readiness plan for the route baseline. The
         # forecast already carries any document-induced delay; changing both would
         # silently move the planned sailing and hide a missed connection.
         routes = routing.compute_routes(shipment(shipment_id), app.state.catalog["ports"],
-                                        app.state.catalog["services"], forecast, profile, SIMULATION_NOW)
+                                        app.state.catalog["services"], forecast, profile, SIMULATION_NOW,
+                                        topology=app.state.topology)
         selected_id = app.state.selected.get(shipment_id)
         if selected_id:
             candidate = next((r for r in [routes["current_route"], *routes["alternatives"]]
@@ -216,9 +237,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 continue
             if event["event_type"] == "port_arrival":
                 event["estimated_at"] = arrival.isoformat().replace("+00:00", "Z")
-            elif event["event_type"] == "sea_departure":
+            elif event["event_type"] in DEPARTURE_EVENT_MODES:
+                # sea/rail/road departures alike: a static estimate would contradict
+                # the route (e.g. SCT-006's rail leg after a missed connection).
+                mode = DEPARTURE_EVENT_MODES[event["event_type"]]
                 matching = next((leg for leg in routes["current_route"]["legs"]
-                                 if leg["mode"] == "sea" and leg["origin_id"] == event["location_id"]), None)
+                                 if leg["mode"] == mode and leg["origin_id"] == event["location_id"]), None)
                 event["estimated_at"] = matching["departure_at"] if matching else None
             elif event["event_type"] == "delivery":
                 event["estimated_at"] = routes["current_route"]["eta"]
@@ -226,12 +250,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 continue
             event["source"] = "synthetic-model"
             event["quality_flag"] = "forecast"
-        return ShipmentDetail(shipment=item, weather=weather, scenario=profile, prediction=forecast,
+        return ShipmentDetail(shipment=item, weather=conditions, scenario=profile, prediction=forecast,
                               selected_route_id=selected_id, preclearance=declaration, **routes)
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "simulation_now": SIMULATION_NOW, "demo_only": True}
+        return {"status": "ok", "simulation_now": SIMULATION_NOW, "demo_only": True,
+                "graph_backend": app.state.topology.name}
 
     @app.get("/api/catalog", dependencies=authenticated)
     def catalog():
@@ -246,8 +271,18 @@ def create_app(db_path: str | None = None) -> FastAPI:
         with lock:
             details = [detail(sid) for sid in app.state.shipments]
             return Dashboard(shipments=details, summary={"total": len(details),
-                "high_risk": sum(d.prediction.risk == "high" or d.current_route.missed_connection for d in details),
+                # An infeasible current route (missed connection, or unavailable under
+                # a closure) is at risk even when the readiness forecast is low.
+                "high_risk": sum(d.prediction.risk == "high" or not d.current_route.feasible for d in details),
                 "co2_kg": sum(d.current_route.co2_kg for d in details)})
+
+    @app.get("/api/summary", response_model=CorridorSummary, dependencies=authenticated)
+    def corridor_summary(weeks: Literal["4", "13"] = "4"):
+        # Other values hit the 422 handler above, which never echoes the input.
+        with lock:
+            details = [detail(sid) for sid in app.state.shipments]
+        return summary.build_summary(app.state.catalog["history"], details,
+                                     app.state.catalog["ports"], int(weeks))
 
     @app.get("/api/shipments/{shipment_id}", response_model=ShipmentDetail, dependencies=authenticated)
     def get_detail(shipment_id: ShipmentId):
@@ -278,6 +313,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
             app.state.selected[shipment_id] = body.route_id
             return detail(shipment_id)
 
+    @app.get("/api/preclearance/ruleset", response_model=Ruleset, dependencies=authenticated)
+    def ruleset():
+        return preclearance.ruleset()
+
     @app.get("/api/shipments/{shipment_id}/preclearance", response_model=Declaration | None,
              dependencies=authenticated)
     def declaration(shipment_id: ShipmentId):
@@ -301,9 +340,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.post("/api/shipments/{shipment_id}/preclearance/submit", response_model=Declaration)
     def submit(shipment_id: ShipmentId, idempotency_key: Annotated[IdempotencyKey, Header()],user=Depends(broker)):
         with lock:
-            shipment(shipment_id)
+            item = shipment(shipment_id)
             with _domain_errors():
-                return preclearance.submit_declaration(app.state.db, shipment_id, idempotency_key, user, SIMULATION_NOW)
+                return preclearance.submit_declaration(app.state.db, shipment_id, idempotency_key, user, SIMULATION_NOW, item)
 
     @app.post("/api/shipments/{shipment_id}/preclearance/review", response_model=Declaration)
     def review(shipment_id: ShipmentId, body: ReviewRequest, user=Depends(actor)):
@@ -322,6 +361,24 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def verify(shipment_id: ShipmentId):
         shipment(shipment_id)
         return preclearance.verify_audit(app.state.db, shipment_id)
+
+    @app.get("/api/shipments/{shipment_id}/ledger", response_model=LedgerStatus, dependencies=authenticated)
+    def ledger_view(shipment_id: ShipmentId):
+        shipment(shipment_id)
+        return preclearance.ledger_status(app.state.db, shipment_id)
+
+    @app.get("/api/hubs/forecast", response_model=HubForecast, dependencies=authenticated)
+    def hub_forecast(shipment_id: Annotated[ShipmentId | None, Query()] = None):
+        # Every shipment's own scenario is already in its route (detail()); the
+        # requested shipment's scenario is also the regional condition (hubs.py).
+        with lock:
+            if shipment_id is not None:
+                shipment(shipment_id)
+            details = [detail(sid).model_dump() for sid in app.state.shipments]
+            regional = routing.scenario_profile(
+                app.state.scenarios.get(shipment_id, "none") if shipment_id else "none")
+            return hubs.forecast(app.state.catalog["ports"], app.state.catalog["services"], details,
+                                 regional, SIMULATION_NOW, focus_shipment_id=shipment_id)
 
     return app
 

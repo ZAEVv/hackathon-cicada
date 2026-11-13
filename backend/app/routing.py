@@ -1,10 +1,10 @@
 """Deterministic scheduling of the remaining simulated journey."""
 from datetime import datetime, timedelta, timezone
-from itertools import product
-
-import networkx as nx
 
 from .esg import calculate_emissions
+from .graphdb import NetworkxTopology, Topology
+
+_DEFAULT_TOPOLOGY = NetworkxTopology()
 
 
 def scenario_profile(kind: str) -> dict:
@@ -15,6 +15,8 @@ def scenario_profile(kind: str) -> dict:
         "arrival_delay_hours": 3 if kind == "storm" else 0,
         "queue_extra_hours": 2 if kind == "storm" else 6 if kind == "congestion" else 0,
         "wind_mps": 22 if kind == "storm" else None,
+        # Storm implies a high sea state (m); None keeps the weather/wind-derived value.
+        "wave_height_m": 4.5 if kind == "storm" else None,
         "blocked_service_ids": ["sea-main"] if kind == "closure" else [],
     }
 
@@ -98,7 +100,12 @@ def planned_cutoff(shipment: dict, services: list[dict],
 
 def compute_routes(shipment: dict, ports: list[dict], services: list[dict],
                    prediction: dict, scenario: dict,
-                   now: str = "2026-11-12T08:00:00Z") -> dict:
+                   now: str = "2026-11-12T08:00:00Z", topology: Topology | None = None) -> dict:
+    """Current route plus up to three alternatives.
+
+    ``topology`` answers which service chains connect the hubs (Neo4j/Cypher or
+    in-memory networkx, see graphdb.py); timing feasibility is checked here.
+    """
     now_dt = _time(now)
     ready = _time(prediction["ready_at"])
     origin, destination = shipment["current_location_id"], shipment["destination_id"]
@@ -122,24 +129,21 @@ def compute_routes(shipment: dict, ports: list[dict], services: list[dict],
                          reason="Planned connection missed; showing earliest recovery." if missed else None,
                          missed=missed)
 
-    graph = nx.DiGraph()
-    graph.add_nodes_from(port_ids)
-    for service in services:
-        graph.add_edge(service["origin_id"], service["destination_id"])
+    by_id = {service["id"]: service for service in services}
     choices = {}
     if missed and actual is not None:
         recovery = _route(actual, shipment["mass_kg"], "Next-departure recovery")
         choices[recovery["id"]] = recovery
-    if origin != destination and nx.has_path(graph, origin, destination):
-        for nodes in nx.all_simple_paths(graph, origin, destination):
-            groups = [[s for s in services if s["origin_id"] == a and s["destination_id"] == b]
-                      for a, b in zip(nodes, nodes[1:])]
-            for path in product(*groups):
-                legs = _schedule(path, ready, now_dt, shipment, blocked)
-                if legs is None:
-                    continue
-                route = _route(legs, shipment["mass_kg"], "Alternative route")
-                if route["id"] != current["id"] or not current["feasible"]:
-                    choices.setdefault(route["id"], route)
+    if origin != destination:
+        chains = (topology or _DEFAULT_TOPOLOGY).service_chains(
+            origin, destination, ports, services, blocked)
+        for chain in chains:
+            path = [by_id[sid] for sid in chain]
+            legs = _schedule(path, ready, now_dt, shipment, blocked)
+            if legs is None:
+                continue
+            route = _route(legs, shipment["mass_kg"], "Alternative route")
+            if route["id"] != current["id"] or not current["feasible"]:
+                choices.setdefault(route["id"], route)
     alternatives = sorted(choices.values(), key=lambda r: (r["eta"], r["cost_usd"], r["id"]))[:3]
     return {"current_route": current, "alternatives": alternatives}

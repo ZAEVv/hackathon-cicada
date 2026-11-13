@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Caspian Transit — защита</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400..800&family=Inter:wght@400;600&display=swap">
+<style>
+html, body { margin: 0; height: 100%; background: #06101D; overflow: hidden; }
+#stage { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; transform-origin: 0 0; }
+#stage > section { position: absolute; inset: 0; box-sizing: border-box; display: none; }
+#stage > section.active { display: flex; }
+section * { margin: 0; box-sizing: border-box; }
+#hud { position: fixed; right: 16px; bottom: 12px; font: 14px Inter, Arial, sans-serif; color: #7f93ad; }
+#notes { position: fixed; left: 0; right: 0; bottom: 0; max-height: 34vh; overflow: auto; display: none;
+  background: rgba(6,16,29,.96); color: #dbe6f5; font: 18px/1.5 Inter, Arial, sans-serif; padding: 16px 24px; border-top: 1px solid #1E3B63; }
+body.show-notes #notes { display: block; }
+@media print {
+  @page { size: 1920px 1080px; margin: 0; }
+  html, body { overflow: visible; height: auto; background: none; }
+  #stage { position: static; transform: none !important; width: 1920px; height: auto; }
+  #stage > section { position: relative; display: flex !important; width: 1920px; height: 1080px; page-break-after: always; }
+  #stage > section * { animation: none !important; }
+  #hud, #notes { display: none !important; }
+}
+:root {
+  --navy: #0B1D33;
+  --navy-2: #12294A;
+  --navy-line: #1E3B63;
+  --text: #EEF3FA;
+  --muted: #A9BCD6;
+  --blue: #5AA9F0;
+  --blue-bright: #8FC6FF;
+}
+
+section {
+  counter-increment: page;
+  padding: 128px 128px 160px;
+  background: var(--navy);
+  color: var(--text);
+  font-family: 'Inter', Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+section.dark, section.accent { background: var(--navy); color: var(--text); }
+
+h1, h2, h3 { font-family: 'Manrope', Arial, sans-serif; font-weight: 800; color: var(--text); }
+h1 { font-size: 112px; line-height: 1.02; letter-spacing: -2px; }
+h2 { font-size: 64px; line-height: 1.08; letter-spacing: -1px; }
+h3 { font-size: 36px; line-height: 1.15; font-weight: 700; }
+
+p { font-size: 30px; line-height: 1.4; }
+.lead { font-size: 36px; line-height: 1.35; color: var(--muted); max-width: 1500px; }
+
+.eyebrow {
+  font-family: 'Manrope', Arial, sans-serif;
+  font-size: 24px; font-weight: 700; letter-spacing: 3px;
+  color: var(--blue);
+}
+
+.footer {
+  position: absolute; left: 128px; bottom: 64px; width: 1664px;
+  font-size: 24px; color: var(--muted);
+  display: flex; justify-content: space-between;
+}
+
+.cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px; }
+.cards.two { grid-template-columns: 1fr 1fr; }
+.cards.four { grid-template-columns: 1fr 1fr 1fr 1fr; }
+.card {
+  background: var(--navy-2); border: 2px solid var(--navy-line); border-radius: 24px;
+  padding: 40px; display: flex; flex-direction: column; gap: 16px;
+  animation: rise 600ms cubic-bezier(.2,.7,.2,1) both;
+  animation-delay: calc(var(--i, 0) * 120ms);
+}
+.card p { font-size: 26px; color: var(--muted); line-height: 1.4; }
+.card .tag {
+  font-family: 'Manrope', Arial, sans-serif; font-size: 24px; font-weight: 700; color: var(--blue-bright);
+}
+
+.big { font-family: 'Manrope', Arial, sans-serif; font-size: 96px; font-weight: 800; line-height: 1; color: var(--blue); }
+.big.warm { color: var(--blue-bright); }
+.card .big { font-size: 80px; line-height: 1; color: var(--blue); }
+.card .big.warm { color: var(--blue-bright); }
+.card.metric { flex-direction: row; align-items: center; gap: 32px; padding: 28px 36px; }
+.card.metric .big { font-size: 72px; min-width: 240px; }
+
+.steps { display: flex; gap: 20px; align-items: stretch; }
+.step {
+  flex: 1; background: var(--navy-2); border: 2px solid var(--navy-line); border-radius: 20px;
+  padding: 32px; display: flex; flex-direction: column; gap: 12px;
+  animation: rise 600ms cubic-bezier(.2,.7,.2,1) both;
+  animation-delay: calc(var(--i, 0) * 140ms);
+}
+.step .num { font-family: 'Manrope', Arial, sans-serif; font-size: 44px; font-weight: 800; color: var(--blue-bright); }
+.step p { font-size: 26px; line-height: 1.35; }
+.step .small { font-size: 24px; color: var(--muted); }
+
+.row { display: flex; gap: 48px; align-items: flex-start; }
+.col { flex: 1; display: flex; flex-direction: column; gap: 24px; }
+
+.pill {
+  font-size: 24px; font-weight: 600; padding: 10px 22px; border-radius: 999px;
+  background: var(--navy-line); color: var(--text);
+}
+
+.fade-in { animation: fadein 700ms ease both; animation-delay: calc(var(--i, 0) * 120ms); }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadein {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+</style>
+</head>
+<body>
+<div id="stage">
+<section id="cover" class="dark" data-transition="fade" style="justify-content:center; gap:48px">
+<p class="eyebrow fade-in">ТРЕК 3 · ЦИФРОВАЯ ЭКОСИСТЕМА МТК «СЕВЕР–ЮГ» · КЕЙС 2</p>
+<h1 class="fade-in" style="--i:1;transform:translate(0, -227px)">Smart Caspian Transit</h1>
+<p class="lead fade-in" style="--i:2">Предиктивный цифровой двойник каспийского звена: видим узкие места до того, как они сорвут график, и проводим груз через таможню заранее.</p>
+<div class="fade-in" style="--i:3; display:flex; gap:16px">
+<p class="pill">Прогноз задержек</p>
+<p class="pill">Предоформление на смарт-контракте</p>
+<p class="pill">Единое окно логиста</p>
+</div>
+<div class="footer"><span>Команда [название команды]</span><span>КЦФ 2026</span></div>
+</section>
+<section id="problem">
+<p class="eyebrow">ПРОБЛЕМА</p>
+<h2>Каспийское звено рвёт график в трёх местах</h2>
+<div class="cards">
+<div class="card" style="--i:0"><p class="tag">01 · Стыковка</p><h3>Ж/д, море и авто живут по разным расписаниям</h3><p>Поезд опоздал на несколько часов — паром ушёл, груз ждёт следующий рейс.</p></div>
+<div class="card" style="--i:1"><p class="tag">02 · Таможня</p><h3>Документы проверяют, когда груз уже в порту</h3><p>Ошибка в инвойсе обнаруживается на причале и превращается в простой.</p></div>
+<div class="card" style="--i:2"><p class="tag">03 · Погода</p><h3>Шторм на Каспии непредсказуем для логиста</h3><p>Ветер и волна закрывают порт, очереди растут, а клиент узнаёт об этом последним.</p></div>
+</div>
+<p class="lead">Логист видит трек-номер, но не видит, что будет через 72 часа.</p>
+<div class="footer"><span>Smart Caspian Transit</span><span>Источник: постановка кейса 2, КЦФ 2026</span></div>
+</section>
+<section id="solution" class="dark">
+<p class="eyebrow">РЕШЕНИЕ</p>
+<h2>Одна платформа закрывает все три требования MVP</h2>
+<div class="cards">
+<div class="card" style="--i:0"><p class="tag">ТЗ · Предиктивная модель</p><h3>Прогноз задержки и срыва стыковки</h3><p>История перевозок + живая погода Open-Meteo + загрузка портов → риск по каждому грузу и прогноз узких мест на 72 часа.</p></div>
+<div class="card" style="--i:1"><p class="tag">ТЗ · Смарт-контракт</p><h3>Автоматическое предоформление</h3><p>Версионируемый набор правил R1–R5 принимает чистую декларацию сам. Каждое решение заверяют три независимых узла реестра.</p></div>
+<div class="card" style="--i:2"><p class="tag">ТЗ · Единое окно</p><h3>Цифровой двойник груза</h3><p>Этапы пути на карте, прогноз прибытия, углеродный след CO₂e и запасные маршруты при форс-мажоре — в один клик.</p></div>
+</div>
+<div class="footer"><span>Smart Caspian Transit</span><span>Требования MVP кейса 2</span></div>
+</section>
+<section id="architecture">
+<p class="eyebrow">АРХИТЕКТУРА</p>
+<h2>Как данные превращаются в решение</h2>
+<div class="steps">
+<div class="step" style="--i:0"><p class="num">1</p><h3>Источники</h3><p>Погода Open-Meteo (ветер, осадки, волна) · расписания ж/д, паромов, авто · история перевозок</p></div>
+<div class="step" style="--i:1"><p class="num">2</p><h3>Граф коридора</h3><p>Neo4j: хабы — узлы, рейсы — связи. Cypher находит все цепочки и обходы</p></div>
+<div class="step" style="--i:2"><p class="num">3</p><h3>Модель</h3><p>Градиентный бустинг с монотонными ограничениями: задержка и риск срыва стыковки</p></div>
+<div class="step" style="--i:3"><p class="num">4</p><h3>API</h3><p>FastAPI: роли брокера и инспектора, журнал аудита с хэш-цепочкой</p></div>
+<div class="step" style="--i:4"><p class="num">5</p><h3>Единое окно</h3><p>React: карта, двойник груза, прогноз хабов, документы</p></div>
+</div>
+<div class="row">
+<p class="pill">Реестр: 3 узла-свидетеля, кворум 2 из 3</p>
+<p class="pill">Docker Compose: приложение + граф + узлы реестра</p>
+</div>
+<div class="footer"><span>Smart Caspian Transit</span><span>Стек: Python · scikit-learn · Neo4j · FastAPI · React</span></div>
+</section>
+<section id="model">
+<p class="eyebrow">ТЗ · ПРЕДИКТИВНАЯ МОДЕЛЬ</p>
+<h2>Модель знает, успеет ли поезд на паром</h2>
+<div class="row">
+<div class="col">
+<h3>На входе</h3>
+<p>Ветер, осадки и высота волны в порту · очередь на причале · уже накопленное опоздание · масса груза · запас времени до отхода парома</p>
+<h3>На выходе</h3>
+<p>Дополнительная задержка в часах и вероятность сорвать стыковку. Отсюда — уровень риска груза.</p>
+<p class="pill" style="align-self:flex-start">Монотонные ограничения: сильнее шторм — задержка не меньше</p>
+</div>
+<div class="col" style="flex:0.9; gap:24px">
+<div class="card metric" style="--i:0"><p class="big">1,5 ч</p><p>Средняя ошибка прогноза задержки (MAE) на отложенной выборке</p></div>
+<div class="card metric" style="--i:1"><p class="big warm">5,0 ч</p><p>Ошибка простой оценки по медиане — модель точнее в 3,3 раза</p></div>
+<div class="card metric" style="--i:2"><p class="big">0,90</p><p>ROC AUC классификации срыва стыковки</p></div>
+</div>
+</div>
+<div class="footer"><span>Smart Caspian Transit</span><span>Хронологическое разделение: обучаемся на прошлом, проверяем на будущем</span></div>
+</section>
+<section id="bottlenecks" class="dark">
+<p class="eyebrow">УЗКИЕ МЕСТА ДО ИХ ВОЗНИКНОВЕНИЯ</p>
+<h2>Прогноз загрузки каждого хаба на 72 часа вперёд</h2>
+<div class="row" style="align-items:center">
+<div class="col">
+<p class="lead">Система складывает прибытие всех грузов по часам, учитывает пропускную способность порта и погоду — и подсвечивает час, когда узел переполнится.</p>
+<p>Сценарий «Шторм»: ветер закрывает рейсы из Махачкалы, грузы копятся, и система заранее показывает пик перегрузки и какие перевозки под ударом.</p>
+</div>
+<div class="col" style="flex:0.7; align-items:center; gap:16px">
+<p class="big warm" style="font-size:180px">165 %</p>
+<p style="text-align:center">пиковая загрузка Махачкалы в шторм — видно за сутки до пика</p>
+</div>
+</div>
+<div class="footer"><span>Smart Caspian Transit</span><span>Пропускная способность: тонн в час для каждого хаба</span></div>
+</section>
+<section id="preclearance">
+<p class="eyebrow">ТЗ · СМАРТ-КОНТРАКТ / ЦИФРОВОЙ КОРИДОР</p>
+<h2>Таможенное предоформление, пока груз ещё в пути</h2>
+<div class="steps">
+<div class="step" style="--i:0"><p class="num">1</p><h3>Черновик</h3><p>Брокер заполняет декларацию и документы</p><p class="small">Каждая правка — новая версия</p></div>
+<div class="step" style="--i:1"><p class="num">2</p><h3>Проверка</h3><p>Номера контейнеров, массы и коды сверяются между документами</p><p class="small">Ошибки видны сразу</p></div>
+<div class="step" style="--i:2"><p class="num">3</p><h3>Смарт-контракт</h3><p>Набор правил rules-v1, R1–R5, исполняется автоматически</p><p class="small">Хэш защищает правила от подмены</p></div>
+<div class="step" style="--i:3"><p class="num">4</p><h3>Решение</h3><p>Все правила пройдены — «Принята» автоматически. Иначе — инспектору</p><p class="small">Повторная отправка не дублирует решение</p></div>
+</div>
+<div class="cards four" style="gap:20px">
+<p class="pill">R1 · документы согласованы</p>
+<p class="pill">R2 · код ТН ВЭД без ручного контроля</p>
+<p class="pill">R3 · стоимость за кг в норме</p>
+<p class="pill">R4–R5 · доверенный отправитель, страна</p>
+</div>
+<div class="footer"><span>Smart Caspian Transit</span><span>Роли: брокер подаёт, инспектор решает — свою декларацию принять нельзя</span></div>
+</section>
+<section id="ledger" class="dark">
+<p class="eyebrow">РАСПРЕДЕЛЁННЫЙ РЕЕСТР</p>
+<h2>Решение по декларации нельзя тихо переписать</h2>
+<div class="row" style="align-items:stretch">
+<div class="col">
+<p class="lead">Каждое действие с декларацией — запись в журнале. Записи сцеплены хэшами: правка любой старой записи ломает всю цепочку.</p>
+<p>Голову цепочки подписывают три независимых узла-свидетеля, каждый со своим ключом и своим хранилищем. Запись считается заверенной, когда подписали минимум двое.</p>
+</div>
+<div class="col" style="flex:0.9">
+<div class="cards" style="gap:20px">
+<div class="card" style="--i:0"><p class="tag">Узел 1</p><h3>Таможня</h3><p>подписал</p></div>
+<div class="card" style="--i:1"><p class="tag">Узел 2</p><h3>Порт</h3><p>подписал</p></div>
+<div class="card" style="--i:2"><p class="tag">Узел 3</p><h3>Перевозчик</h3><p>недоступен</p></div>
+</div>
+<p class="big" style="font-size:72px">Кворум 2 из 3</p>
+<p>Один узел упал — реестр работает. Упали два — система честно говорит, что запись не заверена.</p>
+</div>
+</div>
+<div class="footer"><span>Smart Caspian Transit</span><span>Узлы — отдельные сервисы в Docker Compose</span></div>
+</section>
+<section id="window">
+<p class="eyebrow">ТЗ · ЕДИНОЕ ОКНО ЛОГИСТА</p>
+<h2>Не трек-номер, а цифровой двойник груза</h2>
+<div class="cards">
+<div class="card" style="--i:0"><p class="tag">Двойник</p><h3>Где груз и что с ним будет</h3><p>Этапы ж/д → паром → авто на карте Каспия, прогноз прибытия, риск срыва стыковки и его причины.</p></div>
+<div class="card" style="--i:1"><p class="tag">ESG</p><h3>Углеродный след каждого плеча</h3><p>CO₂e = масса × расстояние × коэффициент вида транспорта. Видно, сколько стоит обход для климата.</p></div>
+<div class="card" style="--i:2"><p class="tag">Форс-мажор</p><h3>Запасной маршрут в один клик</h3><p>Порт закрыт — система ищет обходы по графу, сравнивает срок, стоимость и CO₂e и переключает перевозку.</p></div>
+</div>
+<div class="row">
+<p class="pill">Пример: закрытие → Махачкала → Амирабад → Тегеран · прибытие 15 нояб. · 445 кг CO₂e</p>
+</div>
+<div class="footer"><span>Smart Caspian Transit</span><span>Коэффициенты CO₂e — иллюстративные, заменяются сертифицированными</span></div>
+</section>
+<section id="demo" class="accent">
+<p class="eyebrow">ЖИВОЙ ПОКАЗ · 3 МИНУТЫ</p>
+<h2>Пять шагов на работающей системе</h2>
+<div class="steps">
+<div class="step" style="--i:0"><p class="num">1</p><h3>Обзор</h3><p>6 перевозок, 3 под риском. Погода — живая</p></div>
+<div class="step" style="--i:1"><p class="num">2</p><h3>Шторм</h3><p>Махачкала перегружена, SCT-001 теряет паром</p></div>
+<div class="step" style="--i:2"><p class="num">3</p><h3>Закрытие</h3><p>Обход через Амирабад, выбор в один клик</p></div>
+<div class="step" style="--i:3"><p class="num">4</p><h3>Декларация</h3><p>Смарт-контракт принимает её автоматически</p></div>
+<div class="step" style="--i:4"><p class="num">5</p><h3>Реестр</h3><p>Останавливаем узел — кворум держится</p></div>
+</div>
+<div class="footer"><span>Smart Caspian Transit</span><span>docker compose up — и всё работает</span></div>
+</section>
+<section id="engineering">
+<p class="eyebrow">ИНЖЕНЕРИЯ</p>
+<h2>Это не макет — это работающая система</h2>
+<div class="cards four">
+<div class="card" style="--i:0"><p class="big">847</p><p>автотестов: модель, маршруты, правила, реестр, безопасность</p></div>
+<div class="card" style="--i:1"><p class="big">95</p><p>проверок сквозного сценария на собранной системе</p></div>
+<div class="card" style="--i:2"><p class="big warm">1</p><p>команда запуска: docker compose up</p></div>
+<div class="card" style="--i:3"><p class="big">2</p><p>роли с разными правами: брокер и инспектор</p></div>
+</div>
+<div class="row">
+<p class="pill">API закрыт снаружи, наружу — только интерфейс</p>
+<p class="pill">Контейнеры только для чтения, без привилегий</p>
+<p class="pill">Повторный запрос не дублирует решение</p>
+</div>
+<div class="footer"><span>Smart Caspian Transit</span><span>Python 3.12 · FastAPI · scikit-learn · Neo4j · React 18 · Vite</span></div>
+</section>
+<section id="roadmap" class="dark">
+<p class="eyebrow">ДАЛЬШЕ</p>
+<h2>Что нужно, чтобы выйти в реальный коридор</h2>
+<div class="steps">
+<div class="step" style="--i:0"><p class="num">01</p><h3>Данные портов</h3><p>Подключить реальные расписания и очереди портов Астрахани, Махачкалы, Энзели, Амирабада через их API</p></div>
+<div class="step" style="--i:1"><p class="num">02</p><h3>Обучение на факте</h3><p>Дообучить модель на реальной истории перевозок; погода уже живая</p></div>
+<div class="step" style="--i:2"><p class="num">03</p><h3>Узлы у участников</h3><p>Развернуть узлы реестра у таможни, порта и перевозчика с их собственными ключами</p></div>
+<div class="step" style="--i:3"><p class="num">04</p><h3>Правила таможни</h3><p>Согласовать набор правил с таможенными органами России, Ирана и Казахстана</p></div>
+</div>
+<div class="footer"><span>Smart Caspian Transit</span><span>Архитектура уже готова к каждому шагу</span></div>
+</section>
+<section id="thanks" class="dark" style="justify-content:center; gap:48px">
+<p class="eyebrow fade-in">SMART CASPIAN TRANSIT</p>
+<h1 class="fade-in" style="--i:1">Видим срыв графика до того, как он случился</h1>
+<p class="lead fade-in" style="--i:2">Прогноз задержек · смарт-контракт с распределённым реестром · единое окно логиста с CO₂e и обходами</p>
+<p class="pill fade-in" style="--i:3; align-self:flex-start">Спасибо! Готовы ответить на вопросы</p>
+<div class="footer"><span>Команда [название команды]</span><span>github.com/ZAEVv/hackathon-cicada</span></div>
+</section>
+</div>
+<div id="hud"></div>
+<div id="notes"></div>
+<script>
+const notes = ["Добрый день. Мы команда [название]. Наш кейс — Smart Caspian Transit, предиктивный цифровой двойник каспийского звена коридора «Север–Юг». За пять минут покажем три вещи из ТЗ: модель, которая заранее предсказывает срыв стыковки поезда и парома; автоматическое предварительное таможенное оформление на смарт-контракте с распределённым реестром; и единое окно логиста, где груз виден как цифровой двойник с углеродным следом и запасными маршрутами. Всё это работает вживую, я покажу на сайте.", "Главная боль из ТЗ — рассинхронизация видов транспорта. Поезд приходит в Махачкалу или Оля с опозданием, паром уже ушёл — и груз стоит сутки до следующего рейса. Вторая боль — таможня: документы проверяются, когда контейнер уже в порту, и любая ошибка — это простой. Третья — погода: шторм на Каспии закрывает порт, очередь растёт лавинообразно. Сегодня логист видит только трек-номер и узнаёт о проблеме, когда она уже случилась. Мы делаем так, чтобы он узнавал заранее.", "Мы закрыли все три пункта MVP из ТЗ, и они связаны между собой, а не живут отдельными демками. Модель предсказывает задержку — и это сразу видно в едином окне логиста как риск и как перегрузка порта. Если маршрут закрыт — система предлагает альтернативу, считает её стоимость и CO₂. А документы на груз проходят предварительное оформление ещё в пути, поэтому на причале груз не ждёт таможню.", "Коротко об устройстве. Слева источники: живая погода с Open-Meteo по координатам каждого порта, расписания поездов, паромов и автомобильных рейсов, история перевозок. Сеть коридора лежит в графовой базе Neo4j — хабы это узлы, рейсы это связи, и запросом Cypher мы находим все возможные цепочки и обходы. Модель — градиентный бустинг с монотонными ограничениями: например, больше ветер — задержка не может стать меньше, это делает модель объяснимой. Дальше API на FastAPI с ролями и журналом аудита, и интерфейс на React. Предоформление заверяется тремя отдельными узлами реестра. Всё поднимается одной командой docker compose up.", "Модель отвечает на главный вопрос логиста: успеет ли груз на паром. На вход — погода в порту, которую мы берём вживую с Open-Meteo: ветер, осадки, высота волны; очередь на причале; опоздание, которое груз уже набрал; масса и запас времени до отхода. На выходе — сколько часов добавится и какова вероятность сорвать стыковку. Модель — градиентный бустинг, но с монотонными ограничениями: при усилении ветра или росте очереди прогноз задержки не может уменьшиться. Это делает её поведение предсказуемым и объяснимым. Проверяем честно: делим историю по времени — учимся на прошлом, проверяем на будущем, без перемешивания. Средняя ошибка — полтора часа против пяти у простой оценки по медиане, то есть в три с лишним раза точнее. ROC AUC по срыву стыковки — 0,90. В историю мы специально заложили то, чего модель не видит: поломки кранов, выборочный досмотр, сдвиг отхода парома — поэтому метрика не идеальная, а реалистичная.", "Вторая половина предиктивной части из ТЗ — предсказать узкое место до того, как оно возникло. Для каждого хаба мы на 72 часа вперёд складываем прибытие всех грузов по часам и сравниваем с пропускной способностью порта. Включаю сценарий «Шторм»: рейсы из Махачкалы задерживаются, грузы накапливаются, и система заранее показывает пик загрузки порта — сто шестьдесят пять процентов — и какие конкретно перевозки под ударом. Логист видит это за сутки и может перенаправить груз заранее.", "Второй пункт ТЗ — автоматическое таможенное оформление. Брокер заполняет декларацию и сопроводительные документы, пока груз ещё едет по железной дороге. Система сверяет документы между собой: номер контейнера, массу, код ТН ВЭД. Дальше работает смарт-контракт — версионируемый набор правил R1–R5: документы согласованы, код не из списка ручного контроля, стоимость за килограмм в допустимом диапазоне, отправитель доверенный, страна разрешена. Если всё пройдено — декларация принимается автоматически, без человека. Если нет — уходит инспектору, и брокер не может принять собственную декларацию. Сами правила защищены хэшем: подменить их незаметно нельзя. Покажу вживую.", "Чтобы автоматическое решение было юридически значимым, его нельзя иметь возможность тихо переписать. Каждое действие с декларацией — запись в журнале, записи сцеплены хэшами, как блоки. Голову этой цепочки подписывают три независимых узла-свидетеля — в реальной жизни это были бы таможня, порт и перевозчик, у каждого свой ключ и своё хранилище. Запись заверена, если подписали двое из трёх. На показе я могу остановить один узел прямо сейчас — реестр продолжит работать. Остановлю второй — система честно покажет, что запись не заверена. Это прототип распределённого реестра без тяжёлого блокчейна, ровно то, что в ТЗ названо «распределённый реестр или защищённые API».", "Третий пункт ТЗ — единое окно логиста. Здесь груз — не строчка с трек-номером, а цифровой двойник: на карте видно, какие этапы пройдены, когда он прибудет, какой риск и почему. Для каждого плеча считается углеродный след: масса на расстояние на коэффициент вида транспорта — железная дорога, море или авто. И главное — форс-мажор. Включаю сценарий «Закрытие»: основной паромный рейс недоступен. Система по графу находит обходы — например, через Амирабад — показывает срок, стоимость и CO₂e каждого и позволяет переключить перевозку одним кликом. Выбор сразу отражается везде: на карте, в прогнозе загрузки, в сводке.", "Переключаюсь на сайт. Шаг первый: обзор — шесть перевозок по западной и восточной ветке, три под риском, погода в портах — живая, с отметкой времени. Шаг второй: сценарий «Шторм» — Махачкала уходит в перегрузку, SCT-001 теряет стыковку с паромом, риск становится высоким. Шаг третий: «Закрытие» — система предлагает обход через Амирабад, выбираю его, и он отражается на карте и в прогнозе загрузки. Шаг четвёртый: заполняю декларацию для SCT-001, проверяю, отправляю — смарт-контракт принимает её автоматически. Шаг пятый: в терминале останавливаю один узел реестра — подпись всё равно собирается, кворум два из трёх. Возвращаюсь к слайдам.", "Пара слов об инженерии, потому что это не макет. Больше восьмисот автотестов покрывают модель, маршрутизацию, правила смарт-контракта, реестр и безопасность. Отдельный скрипт проходит весь сценарий показа на собранной системе — девяносто пять проверок. Запускается всё одной командой. API не торчит наружу, контейнеры только для чтения и без привилегий, роли брокера и инспектора разделены, а повторная отправка той же декларации не создаёт второго решения.", "Что нужно, чтобы это заработало в реальном коридоре. Первое — подключить реальные расписания и очереди портов; формат данных у нас уже есть, нужен доступ к их системам. Второе — дообучить модель на фактической истории перевозок; погоду мы уже берём живую. Третье — развернуть узлы реестра у реальных участников, каждый со своим ключом — код узла уже отдельный сервис. Четвёртое — согласовать набор правил с таможнями; правила версионируются, поэтому их можно менять без переписывания системы.", "Подведу итог. Мы закрыли все три требования MVP: модель предсказывает задержки и узкие места заранее, смарт-контракт оформляет груз ещё в пути, а реестр из трёх узлов гарантирует, что решение не перепишут. Логист видит груз как цифровой двойник, с углеродным следом и запасным маршрутом. Спасибо, готовы ответить на вопросы."];
+const slides = [...document.querySelectorAll('#stage > section')];
+const stage = document.getElementById('stage');
+let i = Math.max(0, Math.min(slides.length - 1, (parseInt(location.hash.slice(1)) || 1) - 1));
+function fit() {
+  const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+  stage.style.transform = `scale(${s}) translate(-50%, -50%)`;
+}
+function show(n) {
+  i = Math.max(0, Math.min(slides.length - 1, n));
+  slides.forEach((el, k) => el.classList.toggle('active', k === i));
+  document.getElementById('hud').textContent = `${i + 1} / ${slides.length} · ← → листать · N заметки · F полный экран · Ctrl+P в PDF`;
+  document.getElementById('notes').textContent = notes[i];
+  history.replaceState(null, '', '#' + (i + 1));
+}
+addEventListener('resize', fit);
+addEventListener('keydown', e => {
+  if (['ArrowRight', 'PageDown', ' ', 'Enter'].includes(e.key)) show(i + 1);
+  else if (['ArrowLeft', 'PageUp', 'Backspace'].includes(e.key)) show(i - 1);
+  else if (e.key === 'Home') show(0);
+  else if (e.key === 'End') show(slides.length - 1);
+  else if (e.key.toLowerCase() === 'n' || e.key === 'т') document.body.classList.toggle('show-notes');
+  else if (e.key.toLowerCase() === 'f' || e.key === 'а') document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+});
+addEventListener('click', e => show(e.clientX > innerWidth / 2 ? i + 1 : i - 1));
+fit(); show(i);
+</script>
+</body>
+</html>

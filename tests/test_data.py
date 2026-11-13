@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import statistics
 import sys
 from datetime import datetime, timedelta, timezone
@@ -16,7 +17,12 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app import data as data_module  # noqa: E402
-from app.data import get_weather, load_demo_data  # noqa: E402
+from app.data import (  # noqa: E402
+    _delay_hours,
+    estimate_wave_height_m,
+    get_weather,
+    load_demo_data,
+)
 from app.schemas import (  # noqa: E402
     SIMULATION_NOW,
     Port,
@@ -30,6 +36,7 @@ HISTORY_KEYS = {
     "observed_at",
     "queue_hours",
     "wind_mps",
+    "wave_height_m",
     "precipitation_mm",
     "observed_delay_hours",
     "mass_tonnes",
@@ -96,7 +103,10 @@ def test_catalog_has_required_ports_and_services(demo: dict) -> None:
     assert set(demo) == {"ports", "services", "shipments", "history"}
 
     ports = {port["id"]: port for port in demo["ports"]}
-    assert set(ports) == {"rail_hub", "makhachkala", "olya", "anzali", "tehran"}
+    assert set(ports) == {
+        "rail_hub", "makhachkala", "olya", "anzali", "tehran",
+        "aktau", "turkmenbashi", "amirabad",
+    }
     assert ports["rail_hub"]["kind"] == "terminal"
     assert ports["tehran"]["kind"] == "destination"
     assert ports["makhachkala"]["kind"] == "port"
@@ -165,12 +175,15 @@ def test_schedule_horizon_and_frozen_sea_departures(demo: dict) -> None:
         assert max(gaps) <= timedelta(hours=6)
 
 
-def test_three_demo_shipments_and_sct001_contract(demo: dict) -> None:
+def test_demo_shipments_and_sct001_contract(demo: dict) -> None:
     shipments = demo["shipments"]
     assert [shipment["id"] for shipment in shipments] == [
         "SCT-001",
         "SCT-002",
         "SCT-003",
+        "SCT-004",
+        "SCT-005",
+        "SCT-006",
     ]
     services = {service["id"]: service for service in demo["services"]}
     for shipment in shipments:
@@ -185,8 +198,8 @@ def test_three_demo_shipments_and_sct001_contract(demo: dict) -> None:
         assert planned[-1]["destination_id"] == shipment["destination_id"]
 
     sct001 = shipments[0]
-    assert sct001["reference"] == "North-South demo 001"
-    assert sct001["container_id"] == "DEMO0000001"
+    assert sct001["reference"] == "North–South 001"
+    assert sct001["container_id"] == "CSPU0000013"
     assert sct001["origin_id"] == "rail_hub"
     assert sct001["destination_id"] == "tehran"
     assert sct001["current_location_id"] == "makhachkala"
@@ -250,6 +263,7 @@ def test_history_rows_are_independent_chronological_and_in_window(demo: dict) ->
         for field in (
             "queue_hours",
             "wind_mps",
+            "wave_height_m",
             "precipitation_mm",
             "observed_delay_hours",
             "mass_tonnes",
@@ -334,7 +348,9 @@ def test_synthetic_weather_is_deterministic_and_schema_valid(demo: dict) -> None
         assert first["stale"] is False
         assert first["wind_mps"] >= 0
         assert first["precipitation_mm"] >= 0
-        assert first["wave_height_m"] is None
+        assert 0 <= first["wave_height_m"] <= 1.0  # calm demo sea state
+        if first["wind_mps"] > 0:
+            assert first["wave_height_m"] <= estimate_wave_height_m(first["wind_mps"]) + 0.3
 
     with pytest.raises(KeyError):
         get_weather("unknown-port")
@@ -713,3 +729,81 @@ def test_cache_write_failure_cleans_up_temp_file(
     assert weather["source"] == "open-meteo"  # caching stays best-effort
     assert cache_path.read_text(encoding="utf-8") == "previous"
     assert [p.name for p in tmp_path.iterdir()] == ["weather-cache.json"]
+
+
+def test_eastern_branch_ports_services_and_shipments(demo: dict) -> None:
+    ports = {port["id"]: port for port in demo["ports"]}
+    assert ports["amirabad"]["country"] == "IR"
+    assert ports["aktau"]["country"] == "KZ"
+    assert ports["turkmenbashi"]["country"] == "TM"
+    assert all(ports[i]["kind"] == "port" for i in ("aktau", "turkmenbashi", "amirabad"))
+
+    services = {service["id"]: service for service in demo["services"]}
+    expected = {
+        "rail-east": ("rail_hub", "aktau", "rail"),
+        "sea-aktau": ("aktau", "amirabad", "sea"),
+        "rail-kz-tm": ("aktau", "turkmenbashi", "rail"),
+        "sea-tkm": ("turkmenbashi", "amirabad", "sea"),
+        "sea-mak-amirabad": ("makhachkala", "amirabad", "sea"),
+        "rail-amirabad": ("amirabad", "tehran", "rail"),
+    }
+    for service_id, (origin, destination, mode) in expected.items():
+        service = services[service_id]
+        assert (service["origin_id"], service["destination_id"], service["mode"]) == (
+            origin, destination, mode)
+        assert service["capacity_tonnes"] >= 40
+        Service.model_validate(service)
+
+    for shipment in demo["shipments"][3:]:
+        assert shipment["destination_id"] == "tehran"
+        assert shipment["current_location_id"] in ports
+        assert {event["location_id"] for event in shipment["events"]} <= set(ports)
+
+    for port_id in ("aktau", "turkmenbashi", "amirabad"):
+        first = get_weather(port_id)
+        assert first == get_weather(port_id)
+        assert first["source"] == "synthetic"
+
+
+def test_history_wave_height_correlates_with_wind_and_is_deterministic() -> None:
+    history = load_demo_data()["history"]
+    assert history == load_demo_data()["history"]
+    waves = [row["wave_height_m"] for row in history]
+    assert all(0 < w <= 40 for w in waves)
+    calm = [r["wave_height_m"] for r in history if r["wind_mps"] < 9]
+    stormy = [r["wave_height_m"] for r in history if r["wind_mps"] >= 18]
+    assert statistics.median(calm) < 1.0
+    assert statistics.median(stormy) > 3.0
+    # Sea state adds delay beyond wind: same row, higher waves -> longer delay.
+    base = dict(is_storm=False, queue_hours=2.0, wind_mps=12.0, precipitation_mm=0.0,
+                observed_delay_hours=0.0, mass_tonnes=20.0)
+    low = _delay_hours(**base, wave_height_m=1.0, rng=random.Random(1))
+    high = _delay_hours(**base, wave_height_m=4.0, rng=random.Random(1))
+    assert high > low + 1.0
+
+
+def test_wave_estimate_is_monotonic_and_bounded() -> None:
+    values = [estimate_wave_height_m(w) for w in range(0, 41)]
+    assert values == sorted(values)
+    assert 0.2 <= estimate_wave_height_m(0) and max(values) <= 8.0
+    assert 0.3 <= estimate_wave_height_m(4) <= 0.8
+    assert 3.0 <= estimate_wave_height_m(22) <= 5.0
+
+
+def test_history_has_unobserved_incidents_and_noisy_labels(demo: dict) -> None:
+    history = demo["history"]
+    calm = [r for r in history if r["wind_mps"] < 9 and r["queue_hours"] <= 2]
+    # Crane breakdowns / inspections: some calm rows are late for reasons the
+    # features cannot explain.
+    assert sum(r["delay_hours"] > 3 for r in calm) >= 5
+    # Labels are not a deterministic function of the visible slack: identical-looking
+    # budgets go both ways because the real cutoff slips.
+    margin = [r["hours_to_cutoff"] - r["observed_delay_hours"] - r["queue_hours"] - r["delay_hours"]
+              for r in history]
+    hit_with_room = sum(m > 0 and r["missed_connection"] for m, r in zip(margin, history))
+    made_without_room = sum(m < 0 and not r["missed_connection"] for m, r in zip(margin, history))
+    assert hit_with_room >= 5 and made_without_room >= 5
+    # Heteroscedastic: spread of delay grows with wind.
+    low = [r["delay_hours"] for r in history if r["wind_mps"] < 6]
+    high = [r["delay_hours"] for r in history if r["wind_mps"] >= 18]
+    assert statistics.pstdev(high) > 1.5 * statistics.pstdev(low)

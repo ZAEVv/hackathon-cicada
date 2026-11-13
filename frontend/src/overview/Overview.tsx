@@ -9,6 +9,7 @@ import {
   Clock3,
   CloudSun,
   Container,
+  Gauge,
   Leaf,
   Map as MapIcon,
   RefreshCw,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 import type { Dashboard, Detail, Port } from "../types";
 import {
+  api,
   cargoNames,
   date,
   fmt,
@@ -34,11 +36,13 @@ import {
   scheduleStatus,
   shipmentTone,
   translate,
+  weatherSource,
 } from "../lib";
 import { CountUp, Ring } from "../motion";
 import { reducedMotion } from "../theme";
 import { LegGantt, modeIcon } from "./LegGantt";
 import { RouteMap } from "./RouteMap";
+import { HubPanel, HubTimeBar, loadAt, useHubForecast } from "./HubPanel";
 
 const SCENARIOS = [
   { kind: "none", Icon: Activity, tone: "green" },
@@ -48,6 +52,28 @@ const SCENARIOS = [
 ] as const;
 
 type Sort = "id" | "risk" | "eta";
+
+// Which store answered the route topology (see /api/health): Neo4j or the
+// in-memory networkx fallback. Public endpoint, fetched once.
+const GRAPH_BACKENDS: Record<string, string> = {
+  neo4j: "Neo4j (Cypher)",
+  networkx: "networkx (в памяти)",
+};
+function useGraphBackend() {
+  const [backend, setBackend] = useState("");
+  useEffect(() => {
+    let active = true;
+    api<{ graph_backend?: string }>("/health")
+      .then((h) => {
+        if (active) setBackend(GRAPH_BACKENDS[h.graph_backend ?? ""] ?? "");
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+  return backend;
+}
 
 // Stagger index for the entrance animation.
 const order = (n: number) => ({ "--i": n }) as React.CSSProperties;
@@ -65,6 +91,7 @@ export function Overview({
   name,
   short,
   riskPing,
+  token,
   onSelect,
   onRefresh,
   onScenario,
@@ -80,6 +107,7 @@ export function Overview({
   name: (id: string) => string;
   short: (id: string) => string;
   riskPing: number;
+  token: string;
   onSelect: (id: string) => void;
   onRefresh: () => void;
   onScenario: (kind: string) => void;
@@ -92,6 +120,10 @@ export function Overview({
   const [sort, setSort] = useState<Sort>("id");
   const [showAlts, setShowAlts] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
+  const [showLoad, setShowLoad] = useState(true);
+  const [hubHour, setHubHour] = useState(0);
+  const hub = useHubForecast(token, selected, dashboard);
+  const graphBackend = useGraphBackend();
   const listRef = useRef<HTMLDivElement>(null);
 
   // The bell in the top bar asks for the risky shipments first.
@@ -113,7 +145,7 @@ export function Overview({
 
   // Same rule the server uses for summary.high_risk.
   const isHigh = (s: Detail) =>
-    s.prediction.risk === "high" || s.current_route.missed_connection;
+    s.prediction.risk === "high" || !s.current_route.feasible;
   const high = shipments.filter(isHigh).length;
   const medium = shipments.filter(
     (s) => !isHigh(s) && s.prediction.risk === "medium",
@@ -206,7 +238,7 @@ export function Overview({
           </div>
           <p className="micro">
             Сценарии заменяют друг друга. Шторм моделируется локально у
-            Махачкалы.
+            текущего порта перевозки (Махачкала или Актау).
           </p>
         </section>
 
@@ -265,15 +297,31 @@ export function Overview({
           style={
             { "--i": 3, "--idx": tab === "list" ? 0 : 1 } as React.CSSProperties
           }
+          onKeyDown={(e) => {
+            const order = ["list", "summary"] as const;
+            const cur = order.indexOf(tab);
+            let next = -1;
+            if (e.key === "ArrowRight") next = (cur + 1) % order.length;
+            else if (e.key === "ArrowLeft")
+              next = (cur - 1 + order.length) % order.length;
+            else if (e.key === "Home") next = 0;
+            else if (e.key === "End") next = order.length - 1;
+            if (next < 0) return;
+            e.preventDefault();
+            setTab(order[next]);
+            e.currentTarget
+              .querySelectorAll<HTMLButtonElement>('[role="tab"]')
+              [next]?.focus();
+          }}
         >
           <span className="seg-goo" aria-hidden="true">
-            <i />
             <i />
           </span>
           <button
             type="button"
             role="tab"
             aria-selected={tab === "list"}
+            tabIndex={tab === "list" ? 0 : -1}
             onClick={() => setTab("list")}
           >
             Перевозки <span className="count">{shipments.length}</span>
@@ -282,6 +330,7 @@ export function Overview({
             type="button"
             role="tab"
             aria-selected={tab === "summary"}
+            tabIndex={tab === "summary" ? 0 : -1}
             onClick={() => setTab("summary")}
           >
             Сводка
@@ -392,7 +441,7 @@ export function Overview({
               <strong>
                 <CountUp value={summary.total} />
               </strong>
-              <small>В демонстрационном контуре</small>
+              <small>В контуре мониторинга</small>
             </div>
             <div className="tile glow">
               <span>Высокий риск</span>
@@ -410,23 +459,20 @@ export function Overview({
             </div>
             <div className="tile glow">
               <span>Источник данных</span>
-              <strong>{dashboard.synthetic ? "Демо" : "API"}</strong>
+              <strong>{dashboard.synthetic ? "Встроенный" : "API"}</strong>
               <small>Фиксированное время симуляции</small>
             </div>
           </div>
         )}
-        <p className="demo-note">
-          <span className="pulse" /> Синтетические данные. Не для операционных
-          решений.
-        </p>
       </aside>
 
       <section className="ov-center" aria-label="Схема маршрута">
         <div className="tools reveal" style={order(1)}>
           <div className="tool-group">
             <span className="tool-label">Вид</span>
-            <span className="tool on">
-              <MapIcon size={16} /> Геосхема
+            <span className="tool on" title="Геосхема">
+              <MapIcon size={16} aria-hidden="true" />
+              <span className="tool-name">Геосхема</span>
             </span>
           </div>
           <div className="tool-group">
@@ -436,17 +482,31 @@ export function Overview({
                 type="button"
                 className={"tool" + (showAlts ? " on" : "")}
                 aria-pressed={showAlts}
+                title="Альтернативы"
                 onClick={() => setShowAlts((v) => !v)}
               >
-                <Split size={16} /> Альтернативы
+                <Split size={16} aria-hidden="true" />
+                <span className="tool-name">Альтернативы</span>
               </button>
               <button
                 type="button"
                 className={"tool" + (showLabels ? " on" : "")}
                 aria-pressed={showLabels}
+                title="Подписи"
                 onClick={() => setShowLabels((v) => !v)}
               >
-                <Tag size={16} /> Подписи
+                <Tag size={16} aria-hidden="true" />
+                <span className="tool-name">Подписи</span>
+              </button>
+              <button
+                type="button"
+                className={"tool" + (showLoad ? " on" : "")}
+                aria-pressed={showLoad}
+                title="Загрузка узлов"
+                onClick={() => setShowLoad((v) => !v)}
+              >
+                <Gauge size={16} aria-hidden="true" />
+                <span className="tool-name">Загрузка узлов</span>
               </button>
             </div>
           </div>
@@ -462,6 +522,13 @@ export function Overview({
 
         {d && r ? (
           <>
+            {showLoad && hub.forecast && (
+              <HubTimeBar
+                forecast={hub.forecast}
+                hour={hubHour}
+                onHour={setHubHour}
+              />
+            )}
             <div className="map-stage reveal" style={order(2)}>
               <RouteMap
                 ports={ports}
@@ -470,6 +537,8 @@ export function Overview({
                 current={d.shipment.current_location_id}
                 showAlternatives={showAlts}
                 showLabels={showLabels}
+                load={showLoad ? loadAt(hub.forecast, hubHour) : null}
+                loadLevels={hub.forecast}
               />
               <div className="map-legend">
                 <span>
@@ -483,6 +552,13 @@ export function Overview({
                 <span>
                   <i className="lg-dot" /> Груз сейчас
                 </span>
+                {showLoad && hub.forecast && (
+                  <span className="lg-load">
+                    Загрузка: <i className="hub-low" /> норма
+                    <i className="hub-medium" /> высокая
+                    <i className="hub-high" /> узкое место
+                  </span>
+                )}
               </div>
               <div className="map-badge">
                 <Ship size={16} />{" "}
@@ -513,9 +589,23 @@ export function Overview({
               />
             </div>
 
+            <HubPanel
+              forecast={hub.forecast}
+              error={hub.error}
+              hour={hubHour}
+              name={name}
+              short={short}
+              onHour={(h) => {
+                setShowLoad(true);
+                setHubHour(h);
+              }}
+              onSelect={onSelect}
+              index={4}
+            />
+
             <section
               className="card timeline-card reveal"
-              style={order(4)}
+              style={order(5)}
             >
               <div className="card-heading">
                 <div>
@@ -540,7 +630,8 @@ export function Overview({
                       <div>
                         <strong>{translate(e.event_type)}</strong>
                         <small>
-                          {name(e.location_id)} · {e.source} / {e.quality_flag}
+                          {name(e.location_id)} · {translate(e.source)} /{" "}
+                          {translate(e.quality_flag)}
                         </small>
                       </div>
                     </div>
@@ -765,9 +856,6 @@ export function Overview({
                 ) : (
                   <div className="empty-small">Доступных альтернатив нет</div>
                 )}
-                <p className="micro">
-                  Выбор моделируется локально и не является бронированием.
-                </p>
               </section>
 
               <section className="card glow reveal" style={order(7)}>
@@ -860,14 +948,21 @@ export function Overview({
             <div className="source-note">
               <CircleHelp size={15} />
               <span>
-                Погода: {d.weather.source}
-                {d.weather.stale ? " (устарела)" : ""}, базовый ветер{" "}
+                Погода: {weatherSource(d.weather)} · ветер{" "}
                 {fmt(d.weather.wind_mps, 1)} м/с
+                {d.weather.precipitation_mm > 0 &&
+                  `, осадки ${fmt(d.weather.precipitation_mm, 1)} мм`}
+                {d.weather.wave_height_m != null &&
+                  (d.weather.wave_estimated
+                    ? `, волнение ≈${fmt(d.weather.wave_height_m, 1)} м (оценка по ветру)`
+                    : `, волнение ${fmt(d.weather.wave_height_m, 1)} м`)}
                 {d.scenario.wind_mps != null &&
-                  ` · ветер сценария: ${fmt(d.scenario.wind_mps, 1)} м/с`}{" "}
-                · прогноз: {d.prediction.data_source},{" "}
-                {d.prediction.model_version}. Расписание и показатели
-                демонстрационные.
+                  ` · ветер сценария: ${fmt(d.scenario.wind_mps, 1)} м/с`}
+                {d.scenario.wave_height_m != null &&
+                  ` · волнение сценария: ${fmt(d.scenario.wave_height_m, 1)} м`}{" "}
+                · прогноз: {translate(d.prediction.data_source)},{" "}
+                {d.prediction.model_version}
+                {graphBackend && ` · граф маршрутов: ${graphBackend}`}.
               </span>
             </div>
           </div>

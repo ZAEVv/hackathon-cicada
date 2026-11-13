@@ -7,7 +7,9 @@ import numpy as np
 import pytest
 from sklearn.ensemble import HistGradientBoostingRegressor
 
+from backend.app.data import estimate_wave_height_m
 from backend.app.predictive import predict, train_model
+from backend.app.routing import scenario_profile
 from backend.app.schemas import ModelMetrics, Prediction
 
 CALIBRATION_FACTOR = "Miss probability from synthetic forecast-error spread; not guaranteed calibrated"
@@ -31,11 +33,13 @@ def history_rows(count=100):
     for i in range(count):
         wind = float(rng.uniform(0, 24))
         queue = float(rng.uniform(0, 5))
-        delay = 0.2 + max(0, wind - 8) ** 2 / 30 + queue / 10
+        wave = estimate_wave_height_m(wind) * float(rng.uniform(0.4, 1.8))  # decoupled from wind
+        delay = 0.2 + max(0, wind - 8) ** 2 / 30 + queue / 10 + max(0, wave - 1.7) * 1.5
         rows.append({
             "shipment_id": f"history-{i}",
             "observed_at": (start + timedelta(hours=i)).isoformat().replace("+00:00", "Z"),
-            "queue_hours": queue, "wind_mps": wind, "precipitation_mm": 0,
+            "queue_hours": queue, "wind_mps": wind, "wave_height_m": wave,
+            "precipitation_mm": 0,
             "observed_delay_hours": 0, "mass_tonnes": 20, "hours_to_cutoff": 4,
             "delay_hours": delay, "missed_connection": int(delay + queue >= 4),
         })
@@ -73,7 +77,7 @@ def test_chronological_split_baseline_and_no_holdout_leakage():
         row["wind_mps"] += 100
         row["hours_to_cutoff"] += 100
     other, _ = train_model(changed)
-    probe = np.asarray([[0.5, 6, 0, 0, 20], [5, 22, 0, 3, 20]])
+    probe = np.asarray([[0.5, 6, 0, 0, 20, 0.5], [5, 22, 0, 3, 20, 4.5]])
     np.testing.assert_array_equal(model.regressor.predict(probe), other.regressor.predict(probe))
     np.testing.assert_array_equal(model.residuals, other.residuals)
     assert rows == snapshot
@@ -82,8 +86,9 @@ def test_chronological_split_baseline_and_no_holdout_leakage():
 def test_forecast_is_monotonic_in_wind_queue_and_known_delay():
     model, _ = train_model(history_rows())
     for column, values in ((0, np.linspace(0, 12, 25)), (1, np.linspace(0, 40, 41)),
-                           (2, np.linspace(0, 30, 16)), (3, np.linspace(0, 8, 17))):
-        probe = np.tile([1.0, 10.0, 0.0, 0.0, 20.0], (len(values), 1))
+                           (2, np.linspace(0, 30, 16)), (3, np.linspace(0, 8, 17)),
+                           (5, np.linspace(0, 8, 33))):
+        probe = np.tile([1.0, 10.0, 0.0, 0.0, 20.0, 1.0], (len(values), 1))
         probe[:, column] = values
         assert (np.diff(model.regressor.predict(probe)) >= 0).all()
 
@@ -178,14 +183,14 @@ def test_feature_order_cutoff_and_overrides(inputs):
     scenario.update(arrival_delay_hours=3, queue_extra_hours=2, wind_mps=22)
     # Known readiness: 10:00 + 1 + 3 observed/scenario + .5 + 2 queue + 1 handling = 17:30.
     default = predict(model, shipment, weather, scenario)
-    np.testing.assert_array_equal(recorder.seen[-1], [[2.5, 22, 0, 4, 20]])
+    np.testing.assert_array_equal(recorder.seen[-1], [[2.5, 22, 0, 4, 20, estimate_wave_height_m(22)]])
     assert default["miss_probability"] == 1  # Fallback cutoff: arrival day 14:00Z.
-    assert "Readiness after demo cutoff" in default["factors"]
+    assert "Readiness after cutoff" in default["factors"]
     planned = predict(model, shipment, weather, scenario, cutoff="2026-11-13T18:00:00Z")
     np.testing.assert_array_equal(recorder.seen[-1], recorder.seen[0])  # Cutoff is not a delay driver.
     assert planned["ready_at"] == default["ready_at"] == "2026-11-13T17:30:00Z"
     assert planned["miss_probability"] == 0.25  # Only the +0.6h error exceeds the 0.5h budget.
-    assert "Readiness within demo cutoff" in planned["factors"]
+    assert "Readiness within cutoff" in planned["factors"]
     with pytest.raises(ValueError):
         predict(model, shipment, weather, scenario, cutoff="2026-11-13T18:00:00")
 
@@ -207,7 +212,7 @@ def test_probability_agrees_with_readiness(inputs):
     scenario["queue_extra_hours"] = 3  # Ready 14:30.
     late = predict(model, shipment, weather, scenario)
     assert (late["miss_probability"], late["risk"]) == (1, "high")
-    assert "Readiness after demo cutoff" in late["factors"]
+    assert "Readiness after cutoff" in late["factors"]
 
 
 def test_documents_beyond_cutoff_force_a_miss(inputs):
@@ -232,7 +237,7 @@ def test_readiness_exactly_at_cutoff_is_allowed(inputs):
     shipment["queue_hours"] = 2.75
     result = predict(model, shipment, weather, scenario)
     assert result["ready_at"] == "2026-11-12T14:00:00Z"
-    assert "Readiness within demo cutoff" in result["factors"]
+    assert "Readiness within cutoff" in result["factors"]
     assert result["miss_probability"] == 0
 
 
@@ -279,7 +284,10 @@ def test_generated_demo_history_and_cutoff():
         "kind": "storm", "arrival_delay_hours": 3, "queue_extra_hours": 2, "wind_mps": 22,
     })
     assert metrics["model_mae_hours"] < metrics["baseline_mae_hours"]
-    assert metrics["roc_auc"] > 0.8
+    # Unobserved incidents and cutoff slips cap the achievable skill: a perfect
+    # AUC or near-zero MAE would mean the synthetic history leaks its labels.
+    assert 0.8 < metrics["roc_auc"] < 0.95
+    assert 0.5 < metrics["model_mae_hours"] < 0.6 * metrics["baseline_mae_hours"]
     assert normal["delay_hours"] < 2
     assert normal["ready_at"] < "2026-11-12T14:00:00Z"
     assert normal["risk"] == "low"
@@ -305,7 +313,7 @@ def test_demo_cutoffs_come_from_planned_services():
             # The point forecast and the scheduler judge the same departure.
             late = forecast["ready_at"] > cutoffs[shipment["id"]]
             assert route["current_route"]["missed_connection"] == late
-            assert ("Readiness after demo cutoff" in forecast["factors"]) == late
+            assert ("Readiness after cutoff" in forecast["factors"]) == late
 
 
 def test_planned_cutoff_without_a_planned_departure():
@@ -349,3 +357,48 @@ def test_invalid_bundle_and_clock(inputs):
     model, _ = train_model(history_rows(10))
     with pytest.raises(ValueError):
         predict(model, *inputs, now="2026-11-12T08:00:00")
+
+
+def test_storm_profile_has_high_sea_state_and_raises_delay(inputs):
+    profile = scenario_profile("storm")
+    assert profile["wave_height_m"] >= 3 and profile["wind_mps"] == 22
+    assert scenario_profile("none")["wave_height_m"] is None
+    model, _ = train_model(history_rows())
+    calm = predict(model, *inputs)
+    storm = predict(model, inputs[0], inputs[1], profile)
+    assert storm["delay_hours"] > calm["delay_hours"]
+    assert "High sea state" in storm["factors"]
+    assert "High sea state" not in calm["factors"]
+
+
+def test_forecast_is_monotonic_in_wave_height(inputs):
+    model, _ = train_model(history_rows())
+    delays = []
+    for wave in (0.3, 1.0, 2.0, 3.0, 4.5, 6.0):
+        # Wind 15 m/s: inside the range where history waves actually vary.
+        weather = {**inputs[1], "wind_mps": 15, "wave_height_m": wave}
+        delays.append(predict(model, inputs[0], weather, inputs[2])["delay_hours"])
+    assert delays == sorted(delays)
+    assert delays[-1] > delays[0]
+    high = predict(model, inputs[0], {**inputs[1], "wave_height_m": 3.5}, inputs[2])
+    mid = predict(model, inputs[0], {**inputs[1], "wave_height_m": 2.0}, inputs[2])
+    assert "High sea state" in high["factors"] and "Moderate sea state" in mid["factors"]
+
+
+def test_missing_wave_height_falls_back_to_wind_estimate(inputs):
+    recorder = ZeroDelay()
+    model, _ = train_model(history_rows())
+    model = type(model)(recorder, model.residuals)
+    weather = {"wind_mps": 15, "precipitation_mm": 0}
+    predict(model, inputs[0], weather, inputs[2])
+    predict(model, inputs[0], {**weather, "wave_height_m": None}, inputs[2])
+    predict(model, inputs[0], {**weather, "wave_height_m": estimate_wave_height_m(15)}, inputs[2])
+    assert recorder.seen[0][0][5] == estimate_wave_height_m(15)
+    np.testing.assert_array_equal(recorder.seen[0], recorder.seen[1])
+    np.testing.assert_array_equal(recorder.seen[0], recorder.seen[2])
+    # A wind-only scenario override re-estimates the sea state from that wind.
+    predict(model, inputs[0], {**weather, "wave_height_m": 0.5},
+            {**inputs[2], "wind_mps": 22})
+    assert recorder.seen[3][0][5] == estimate_wave_height_m(22)
+    with pytest.raises(ValueError):
+        predict(model, inputs[0], {**weather, "wave_height_m": -1}, inputs[2])

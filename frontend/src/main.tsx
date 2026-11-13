@@ -22,15 +22,23 @@ import "./style.css";
 import { MinimalDashboard } from "./minimal/MinimalDashboard";
 import { Overview } from "./overview/Overview";
 import { useSpotlight } from "./motion";
-import { applyTheme, loadTheme, switchTheme, type Theme } from "./theme";
+import {
+  applyTheme,
+  loadTheme,
+  reducedMotion,
+  switchTheme,
+  type Theme,
+} from "./theme";
 import type {
   Audit,
   Dashboard,
   Declaration,
   Detail,
+  LedgerStatus,
   Metrics,
   Payload,
   Port,
+  Ruleset,
   Verification,
 } from "./types";
 import {
@@ -40,17 +48,26 @@ import {
   api,
   date,
   docs,
+  fieldLabel,
   fmt,
   initialPayload,
+  ledgerChipLabels,
+  ledgerErrorLabels,
+  ledgerNodeLabels,
+  ledgerStateLabels,
+  ledgerStatusNotes,
   loadToken,
   lookup,
   newIdempotencyKey,
   portName,
   portShortName,
   post,
+  ruleLabels,
+  shortHash,
   statuses,
   storeToken,
   toAmount,
+  translate,
 } from "./lib";
 
 const PAGES = [
@@ -88,13 +105,39 @@ function Logo({ size = 30 }: { size?: number }) {
   );
 }
 
+const PAGE_IDS = PAGES.map((p) => p.id) as readonly string[];
+// Hash format: #/<page>[/<shipment id>]. Values are validated by callers.
+function parseHash(): { page: Page; id: string } {
+  const [pg = "", rawId = ""] = location.hash.replace(/^#\/?/, "").split("/");
+  let id = "";
+  try {
+    id = decodeURIComponent(rawId);
+  } catch {
+    id = "";
+  }
+  return {
+    page: PAGE_IDS.includes(pg) ? (pg as Page) : "overview",
+    id,
+  };
+}
+const TOAST_BY_PATH: Record<string, string> = {
+  "/scenario": "Сценарий применён",
+  "/scenario/reset": "Сценарий сброшен",
+  "/route": "Маршрут выбран",
+  "/preclearance": "Черновик сохранён",
+  "/preclearance/validate": "Черновик проверен",
+  "/preclearance/submit": "Декларация отправлена",
+  "/preclearance/review": "Решение записано",
+};
+
 function App() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null),
     [ports, setPorts] = useState<Port[]>([]),
     [selected, setSelected] = useState(""),
     [detail, setDetail] = useState<Detail | null>(null),
     [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [page, setPage] = useState<Page>("overview"),
+  const initialHash = useRef(parseHash());
+  const [page, setPage] = useState<Page>(initialHash.current.page),
     [broker, setBroker] = useState(() =>
       loadToken(TOKEN_KEYS.broker, DEFAULT_TOKENS.broker),
     ),
@@ -112,14 +155,26 @@ function App() {
     [form, setForm] = useState<Payload | null>(null),
     [audit, setAudit] = useState<Audit[]>([]),
     [verification, setVerification] = useState<Verification | null>(null),
-    [comment, setComment] = useState("");
+    [ledgerView, setLedgerView] = useState<LedgerStatus | null>(null),
+    [comment, setComment] = useState(""),
+    [toast, setToast] = useState(""),
+    [toastClosing, setToastClosing] = useState(false),
+    [ruleset, setRuleset] = useState<Ruleset | null>(null);
   const selectedRef = useRef("");
+  const toastTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+  const settingsOpener = useRef<HTMLElement | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const dashboardRef = useRef<Dashboard | null>(null);
+  const switchRef = useRef<(id: string) => void>(() => {});
+  const lastPage = useRef<Page>(initialHash.current.page);
   const refreshVersion = useRef(0);
   const submitKey = useRef<{ scope: string; key: string } | null>(null);
   useSpotlight();
   // Reads accept either role: broker token, else reviewer token.
   const authToken = broker || reviewer;
   const openSettings = () => {
+    settingsOpener.current = document.activeElement as HTMLElement | null;
     setBrokerDraft(broker);
     setReviewerDraft(reviewer);
     setSettings(true);
@@ -128,6 +183,8 @@ function App() {
     setBrokerDraft("");
     setReviewerDraft("");
     setSettings(false);
+    const opener = settingsOpener.current;
+    if (opener && document.contains(opener)) setTimeout(() => opener.focus(), 0);
   };
   const name = (id: string) => {
     const port = ports.find((p) => p.id === id);
@@ -148,13 +205,30 @@ function App() {
   };
   const switchShipment = (id: string) => {
     if (busy || id === selectedRef.current) return;
-    refreshVersion.current++;
+    // No refreshVersion bump: an in-flight refresh must still deliver its
+    // dashboard; its detail is dropped by the selectedRef check.
     selectedRef.current = id;
     setDetail(null);
     setForm(null);
     setAudit([]);
     setVerification(null);
+    setLedgerView(null);
     setSelected(id);
+  };
+  switchRef.current = switchShipment;
+  const dismissToast = () => {
+    window.clearTimeout(toastTimer.current);
+    setToastClosing(true);
+    toastTimer.current = window.setTimeout(() => setToast(""), reducedMotion() ? 0 : 180);
+  };
+  const showToast = (msg: string) => {
+    window.clearTimeout(toastTimer.current);
+    setToastClosing(false);
+    setToast(msg);
+    toastTimer.current = window.setTimeout(
+      dismissToast,
+      reducedMotion() ? 6000 : 4000,
+    );
   };
   const refresh = async (id?: string) => {
     const version = ++refreshVersion.current;
@@ -165,7 +239,13 @@ function App() {
     if (version !== refreshVersion.current) return;
     setDashboard(dash);
     setPorts(cat.ports);
-    const target = id || selectedRef.current || dash.shipments[0]?.shipment.id;
+    dashboardRef.current = dash;
+    // The hash id is only honoured when it names a known shipment.
+    const hashId = initialHash.current.id;
+    const fromHash = dash.shipments.find((s) => s.shipment.id === hashId)
+      ?.shipment.id;
+    const target =
+      id || selectedRef.current || fromHash || dash.shipments[0]?.shipment.id;
     if (target) {
       if (!selectedRef.current) {
         selectedRef.current = target;
@@ -201,8 +281,9 @@ function App() {
         {},
         authToken,
       ),
+      loadLedger(selected),
     ])
-      .then(([d, a]) => {
+      .then(([d, a, l]) => {
         if (active && selectedRef.current === selected) {
           setDetail(d);
           // Keep unsaved edits when only the token changed (switchShipment
@@ -210,6 +291,7 @@ function App() {
           setForm((prev) => prev ?? (d.preclearance?.payload || initialPayload(d)));
           setAudit(a);
           setVerification(null);
+          setLedgerView(l);
         }
       })
       .catch((e) => {
@@ -220,6 +302,12 @@ function App() {
     };
   }, [selected, authToken]);
   useEffect(() => {
+    if (page !== "documents" || !authToken) return;
+    api<Ruleset>("/preclearance/ruleset", {}, authToken)
+      .then(setRuleset)
+      .catch(() => setRuleset(null));
+  }, [page, authToken]);
+  useEffect(() => {
     if (page === "model" && !metrics)
       api<Metrics>("/model/metrics", {}, authToken)
         .then(setMetrics)
@@ -227,12 +315,83 @@ function App() {
   }, [page, authToken]);
   useEffect(() => {
     if (!settings) return;
+    const modal = modalRef.current;
+    const focusables = () =>
+      Array.from(
+        modal?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+    modal?.querySelector<HTMLElement>("input")?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeSettings();
+      if (e.key !== "Tab") return;
+      const items = focusables();
+      if (!items.length) return;
+      const first = items[0],
+        last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!modal?.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [settings]);
+  // Keep location.hash in sync: push on page change, replace on selection.
+  useEffect(() => {
+    if ((page === "overview" || page === "documents") && !selected) return;
+    const withId = (page === "overview" || page === "documents") && selected;
+    const hash = "#/" + page + (withId ? "/" + encodeURIComponent(selected) : "");
+    if (location.hash !== hash) {
+      const pageChanged = lastPage.current !== page;
+      history[pageChanged ? "pushState" : "replaceState"](null, "", hash);
+    }
+    lastPage.current = page;
+  }, [page, selected]);
+  useEffect(() => {
+    const onNav = () => {
+      const { page: nextPage, id } = parseHash();
+      lastPage.current = nextPage;
+      setPage(nextPage);
+      const known = dashboardRef.current?.shipments.some(
+        (s) => s.shipment.id === id,
+      );
+      if (known && (nextPage === "overview" || nextPage === "documents"))
+        switchRef.current(id);
+    };
+    window.addEventListener("hashchange", onNav);
+    window.addEventListener("popstate", onNav);
+    return () => {
+      window.removeEventListener("hashchange", onNav);
+      window.removeEventListener("popstate", onNav);
+    };
+  }, []);
+  // Busy feedback: mark the button that started the action and explain
+  // disabled buttons while a request is in flight.
+  useEffect(() => {
+    if (!busy) return;
+    const BUSY_TITLE = "Идёт запрос…";
+    const titled: HTMLElement[] = [];
+    document.querySelectorAll<HTMLButtonElement>("main button:disabled").forEach((b) => {
+      if (!b.title) {
+        b.title = BUSY_TITLE;
+        titled.push(b);
+      }
+    });
+    // Only undo our own value: React may have set a real title meanwhile.
+    return () =>
+      titled.forEach((b) => {
+        if (b.title === BUSY_TITLE) b.removeAttribute("title");
+      });
+  }, [busy]);
   const mutate = async (
     path: string,
     options: RequestInit,
@@ -241,6 +400,12 @@ function App() {
   ) => {
     if (!selected || busy || detail?.shipment.id !== selected) return;
     refreshVersion.current++;
+    const trigger = document.activeElement;
+    const marked =
+      trigger instanceof HTMLButtonElement && trigger.closest("main")
+        ? trigger
+        : null;
+    marked?.setAttribute("data-busy", "true");
     setBusy(true);
     setError("");
     try {
@@ -260,14 +425,26 @@ function App() {
           ),
         );
         setVerification(null);
+        const l = await loadLedger(selected);
+        if (selectedRef.current === selected) setLedgerView(l);
       }
       await refresh(selected);
+      const okMsg = TOAST_BY_PATH[path];
+      if (okMsg) showToast(okMsg);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      marked?.removeAttribute("data-busy");
       setBusy(false);
     }
   };
+  // Ledger status is supplementary: a failure never blocks the audit card.
+  const loadLedger = (id: string) =>
+    api<LedgerStatus>(
+      `/shipments/${encodeURIComponent(id)}/ledger`,
+      {},
+      authToken,
+    ).catch(() => null);
   const verify = async () => {
     const target = selected;
     try {
@@ -277,6 +454,8 @@ function App() {
         authToken,
       );
       if (selectedRef.current === target) setVerification(result);
+      const l = await loadLedger(target);
+      if (selectedRef.current === target) setLedgerView(l);
     } catch (e) {
       if (selectedRef.current === target) setError((e as Error).message);
     }
@@ -286,7 +465,7 @@ function App() {
     dirty = !form || !d?.preclearance ||
       JSON.stringify(form) !== JSON.stringify(d.preclearance.payload),
     displayedForm = submitted ? d.preclearance!.payload : form;
-  const review = (decision: "demo_accepted" | "needs_revision") => {
+  const review = (decision: "accepted" | "needs_revision") => {
     if (busy || !submitted || dirty) return;
     mutate(
       "/preclearance/review",
@@ -299,24 +478,6 @@ function App() {
   const atRisk = dashboard?.summary.high_risk ?? 0;
   return (
     <div className="app">
-      <svg
-        className="goo-defs"
-        width="0"
-        height="0"
-        aria-hidden="true"
-        focusable="false"
-      >
-        <defs>
-          <filter id="goo" colorInterpolationFilters="sRGB">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur" />
-            <feColorMatrix
-              in="blur"
-              mode="matrix"
-              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -8"
-            />
-          </filter>
-        </defs>
-      </svg>
       <aside className="rail">
         <div className="rail-logo" title="Smart Caspian Transit">
           <Logo />
@@ -325,9 +486,19 @@ function App() {
           className="rail-nav"
           aria-label="Разделы"
           style={{ "--idx": pageIndex } as React.CSSProperties}
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+            const btns = Array.from(
+              e.currentTarget.querySelectorAll<HTMLButtonElement>(".rail-btn"),
+            );
+            const i = btns.indexOf(document.activeElement as HTMLButtonElement);
+            if (i < 0) return;
+            e.preventDefault();
+            const step = e.key === "ArrowDown" ? 1 : -1;
+            btns[(i + step + btns.length) % btns.length].focus();
+          }}
         >
           <span className="nav-goo" aria-hidden="true">
-            <i />
             <i />
           </span>
           {PAGES.map(({ id, label, title, Icon }) => (
@@ -365,12 +536,9 @@ function App() {
           <span className="brand-page">{PAGES[pageIndex].title}</span>
         </div>
         <div className="top-right">
-          <span
-            className="live"
-            title="Синтетические данные. Не для операционных решений."
-          >
+          <span className="live">
             <span className="pulse" />
-            <span className="live-text">Демо-данные</span>
+            <span className="live-text">Мониторинг</span>
           </span>
           <span className="clock">
             <Clock3 size={15} /> {date(dashboard?.simulation_now)}
@@ -385,7 +553,6 @@ function App() {
             onClick={toggleTheme}
           >
             <span className="tt-goo" aria-hidden="true">
-              <i />
               <i />
             </span>
             <Moon size={17} />
@@ -415,7 +582,10 @@ function App() {
           </button>
         </div>
       </header>
-      <main className={"stage" + (page === "overview" ? " fixed" : "")}>
+      <main
+        className={"stage" + (page === "overview" ? " fixed" : "")}
+        aria-busy={busy}
+      >
         {error && (
           <div className="error" role="alert">
             <TriangleAlert size={18} />
@@ -465,6 +635,7 @@ function App() {
                 name={name}
                 short={short}
                 riskPing={riskPing}
+                token={authToken}
                 onSelect={switchShipment}
                 onRefresh={() => refresh().catch((e) => setError(e.message))}
                 onScenario={(kind) => mutate("/scenario", post({ kind }))}
@@ -485,7 +656,7 @@ function App() {
                       </div>
                       <h1>Предварительная декларация</h1>
                       <p>
-                        Подготовка, проверка и демонстрационное рассмотрение
+                        Подготовка, проверка и рассмотрение
                         документов
                       </p>
                     </div>
@@ -502,26 +673,14 @@ function App() {
                       </select>
                     </label>
                   </div>
-                  <div
-                    className="notice reveal"
-                    style={{ "--i": 1 } as React.CSSProperties}
-                  >
-                    <ShieldCheck size={20} />
-                    <div>
-                      <strong>
-                        Демонстрационный процесс, не таможенное оформление
-                      </strong>
-                      <p>
-                        Статус «Принята в демо» не означает официального решения
-                        таможни. Изменение документов может повлиять на
-                        готовность груза и маршрут.
-                      </p>
-                    </div>
-                  </div>
+                  <ClearanceStepper
+                    status={d.preclearance?.status}
+                    dirty={dirty}
+                  />
                   <div className="document-grid">
                     <section
                       className="card form-card reveal"
-                      style={{ "--i": 2 } as React.CSSProperties}
+                      style={{ "--i": 3 } as React.CSSProperties}
                     >
                       <div className="card-heading">
                         <div>
@@ -647,7 +806,7 @@ function App() {
                         </button>
                         <button
                           type="button"
-                          disabled={busy || !d.preclearance || d.preclearance.status === "submitted" || d.preclearance.status === "needs_revision" ||
+                          disabled={busy || !d.preclearance || ["submitted", "auto_accepted", "accepted", "needs_revision"].includes(d.preclearance.status) ||
                             JSON.stringify(form) !== JSON.stringify(d.preclearance.payload)}
                           className="secondary"
                           onClick={() =>
@@ -705,22 +864,26 @@ function App() {
                         <div className="issues">
                           <strong>Замечания проверки</strong>
                           {d.preclearance.validation.issues.map((issue, i) => (
-                            <p key={i}>
-                              {issue.field}: {issue.message} ({issue.code})
+                            <p key={i} style={{ "--i": i } as React.CSSProperties}>
+                              {fieldLabel(issue.field, displayedForm.documents)}: {translate(issue.message)}
                             </p>
                           ))}
                         </div>
                       )}
                     </section>
                     <div>
+                      <ClearanceCard
+                        ruleset={ruleset}
+                        declaration={dirty ? null : d.preclearance}
+                      />
                       <section
                         className="card review-card reveal"
-                        style={{ "--i": 3 } as React.CSSProperties}
+                        style={{ "--i": 4 } as React.CSSProperties}
                       >
                         <div className="card-heading">
                           <div>
                             <h3>Рассмотрение</h3>
-                            <p>Действие демонстрационного проверяющего</p>
+                            <p>Действие инспектора</p>
                           </div>
                           <ClipboardCheck size={19} className="muted" />
                         </div>
@@ -740,9 +903,9 @@ function App() {
                             disabled={
                               busy || !submitted || dirty
                             }
-                            onClick={() => review("demo_accepted")}
+                            onClick={() => review("accepted")}
                           >
-                            Принять в демо
+                            Принять
                           </button>
                           <button
                             type="button"
@@ -758,7 +921,7 @@ function App() {
                       </section>
                       <section
                         className="card audit-card reveal"
-                        style={{ "--i": 4 } as React.CSSProperties}
+                        style={{ "--i": 5 } as React.CSSProperties}
                       >
                         <div className="card-heading">
                           <div>
@@ -797,6 +960,68 @@ function App() {
                             </span>
                           </div>
                         )}
+                        {ledgerView && (
+                          <div
+                            className={`ledger-row ledger-${ledgerView.status}`}
+                          >
+                            <div className="ledger-summary">
+                              <ShieldCheck size={14} />
+                              <span>
+                                Распределённый реестр:{" "}
+                                {ledgerView.nodes_in_sync} из{" "}
+                                {ledgerView.nodes_total} узлов подписали ·{" "}
+                                <b className="ledger-quorum">
+                                  кворум {ledgerView.quorum} из{" "}
+                                  {ledgerView.nodes_total}{" "}
+                                  {ledgerView.status === "no_quorum" ||
+                                  ledgerView.status === "disabled"
+                                    ? "не достигнут"
+                                    : "достигнут"}
+                                </b>
+                                {lookup(ledgerStatusNotes, ledgerView.status)
+                                  ? ` · ${lookup(ledgerStatusNotes, ledgerView.status)}`
+                                  : ""}
+                              </span>
+                            </div>
+                            <div className="ledger-nodes">
+                              {ledgerView.nodes.map((n, i) => (
+                                <span
+                                  key={n.node_id}
+                                  className={`ledger-chip ${n.state}`}
+                                  style={{ "--i": i } as React.CSSProperties}
+                                  title={`${n.node_id} · ${
+                                    lookup(ledgerStateLabels, n.state) ?? n.state
+                                  }${
+                                    n.error
+                                      ? ` · ${lookup(ledgerErrorLabels, n.error) ?? n.error}`
+                                      : ""
+                                  }${
+                                    n.last_sequence != null
+                                      ? ` · запись №${n.last_sequence}`
+                                      : ""
+                                  }${
+                                    n.head_hash
+                                      ? ` · ${shortHash(n.head_hash)}`
+                                      : ""
+                                  }`}
+                                >
+                                  <span className="ledger-dot" />
+                                  <span className="ledger-name">
+                                    {lookup(ledgerNodeLabels, n.node_id) ?? n.label}
+                                  </span>
+                                  <span className="ledger-state">
+                                    {lookup(ledgerChipLabels, n.state) ?? n.state}
+                                  </span>
+                                </span>
+                              ))}
+                            </div>
+                            <p className="micro ledger-micro">
+                              {ledgerView.mode === "network"
+                                ? "Узлы — отдельные сетевые сервисы со своими базами и ключами; один узел может быть недоступен без потери кворума. Прототип, не промышленный реестр."
+                                : "Узлы работают в одном процессе с API; это прототип, не промышленный реестр."}
+                            </p>
+                          </div>
+                        )}
                         <p className="micro">
                           Проверка хеш-цепочки не подтверждает подлинность или
                           решение таможни.
@@ -807,7 +1032,7 @@ function App() {
                               <span className="event-dot done" />
                               <div>
                                 <strong>
-                                  #{a.sequence} · {a.action}
+                                  #{a.sequence} · {translate(a.action)}
                                 </strong>
                                 <small>
                                   {a.actor} · {date(a.at)}
@@ -831,7 +1056,7 @@ function App() {
               ))}
             {page === "minimal" && (
               <div className="content">
-                <MinimalDashboard />
+                <MinimalDashboard token={authToken} />
               </div>
             )}
             {page === "model" && (
@@ -853,7 +1078,7 @@ function App() {
                     >
                       <Activity size={20} />
                       <div>
-                        <strong>Демонстрационная модель</strong>
+                        <strong>Оценка модели</strong>
                         <p>
                           Хронологическое разделение данных без перемешивания.
                           Результаты не проверены на реальных перевозках
@@ -912,7 +1137,7 @@ function App() {
                         <strong>{date(metrics.split_at)}</strong>
                       </div>
                       <p className="micro">
-                        {metrics.disclaimer} ROC AUC может быть недоступен,
+                        {translate(metrics.disclaimer)} ROC AUC может быть недоступен,
                         если в тестовой выборке только один класс.
                       </p>
                     </section>
@@ -928,9 +1153,25 @@ function App() {
           </div>
         )}
       </main>
+      <div className="toast-area" aria-live="polite" role="status">
+        {toast && (
+          <div className={"toast" + (toastClosing ? " closing" : "")} key={toast}>
+            <Check size={16} aria-hidden="true" />
+            <span>{toast}</span>
+            <button
+              type="button"
+              aria-label="Закрыть уведомление"
+              onClick={dismissToast}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+      </div>
       {settings && (
         <div className="modal-backdrop" onClick={closeSettings}>
           <div
+            ref={modalRef}
             className="modal card"
             role="dialog"
             aria-modal="true"
@@ -940,7 +1181,7 @@ function App() {
             <div className="card-heading">
               <div>
                 <h3>Настройки доступа</h3>
-                <p>Токены демонстрационных ролей</p>
+                <p>Токены ролей</p>
               </div>
               <button
                 type="button"
@@ -965,7 +1206,7 @@ function App() {
             <p className="micro">
               Брокер изменяет сценарии, выбирает маршруты и отправляет
               декларации. Без сохранённого токена используется встроенный
-              демо-токен (только для локальных клиентов).
+              токен разработки (только для локальных клиентов).
             </p>
             <label>
               Токен проверяющего
@@ -979,7 +1220,7 @@ function App() {
               />
             </label>
             <p className="micro">
-              Проверяющий принимает демо-решение или возвращает на доработку.
+              Проверяющий принимает решение или возвращает на доработку.
               Токены хранятся только в этой вкладке (sessionStorage) и
               удаляются при её закрытии. Пустое поле — токен не отправляется.
             </p>
@@ -1004,6 +1245,96 @@ function App() {
     </div>
   );
 }
+function ClearanceStepper({
+  status,
+  dirty,
+}: {
+  status?: string;
+  dirty: boolean;
+}) {
+  // needs_revision: the next step is saving a new draft version.
+  const current = dirty || status === "needs_revision"
+    ? 0
+    : status === "ready"
+      ? 2
+      : status === "draft" || status === "validation_failed"
+        ? 1
+        : status
+          ? 3
+          : 0;
+  const decided = !dirty && (status === "auto_accepted" || status === "accepted");
+  const steps = ["Сохранить", "Проверить", "Отправить", "Решение"];
+  return (
+    <ol className="stepper reveal" aria-label="Этапы оформления">
+      {steps.map((label, i) => {
+        const state =
+          i < current || (i === 3 && decided) ? "done" : i === current ? "current" : "upcoming";
+        return (
+          <li key={label} className={state} style={{ "--i": i } as React.CSSProperties} aria-current={state === "current" ? "step" : undefined}>
+            <span key={state}>{state === "done" ? "✓" : i + 1}</span>
+            {label}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function ClearanceCard({
+  ruleset,
+  declaration,
+}: {
+  ruleset: Ruleset | null;
+  declaration: Declaration | null;
+}) {
+  const clearance = declaration?.clearance ?? null;
+  const results = clearance?.results ?? [];
+  const rules = ruleset?.rules.map((r) => r.id) ?? clearance?.results.map((r) => r.rule_id) ?? [];
+  const failed = clearance?.results.filter((r) => !r.passed).map((r) => r.rule_id) ?? [];
+  const id = clearance?.ruleset_id ?? ruleset?.id;
+  const hash = clearance?.ruleset_hash ?? ruleset?.ruleset_hash;
+  return (
+    <section className="card clearance-card reveal">
+      <div className="card-heading">
+        <div>
+          <h3>Смарт-контракт оформления</h3>
+          <p>
+            {id ?? "—"}
+            {hash && <span className="mono" title={hash}> · {shortHash(hash)}</span>}
+          </p>
+        </div>
+        <ShieldCheck size={19} className="muted" />
+      </div>
+      <ul className="rule-list">
+        {rules.map((rid, i) => {
+          const r = results.find((x) => x.rule_id === rid);
+          return (
+            <li key={rid} style={{ "--i": i } as React.CSSProperties} className={r ? (r.passed ? "pass" : "fail") : undefined}>
+              <b key={r ? String(r.passed) : "pending"}>{r ? (r.passed ? "✓" : "✗") : "·"}</b>
+              <span>
+                {rid}: {lookup(ruleLabels, rid) ?? rid}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {clearance?.decision === "auto_accepted" && (
+        <div className="clearance-banner ok" role="status">
+          Одобрено автоматически по правилам {clearance.ruleset_id}
+        </div>
+      )}
+      {clearance?.decision === "manual_review" && (
+        <div className="clearance-banner manual" role="status">
+          Требуется ручная проверка: {failed.join(", ")}
+        </div>
+      )}
+      <p className="micro">
+        Хэш набора правил защищает сами правила от незаметных изменений.
+      </p>
+    </section>
+  );
+}
+
 function Kpi({
   icon,
   label,

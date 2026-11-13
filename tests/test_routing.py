@@ -88,3 +88,42 @@ def test_profiles():
     assert scenario_profile("closure")["blocked_service_ids"] == ["sea-main"]
     with pytest.raises(ValueError):
         scenario_profile("unknown")
+
+
+def test_catalog_offers_eastern_alternatives_for_every_demo_shipment():
+    import time
+
+    from backend.app.data import SIMULATION_NOW, load_demo_data
+
+    catalog = load_demo_data()
+    started = time.monotonic()
+    for shipment in catalog["shipments"]:
+        result = compute_routes(shipment, catalog["ports"], catalog["services"],
+                                {"ready_at": shipment["documents_ready_at"]},
+                                scenario_profile("none"), SIMULATION_NOW)
+        assert result["current_route"]["legs"]
+        Route.model_validate(result["current_route"])
+    assert time.monotonic() - started < 5
+
+    sct004 = next(s for s in catalog["shipments"] if s["id"] == "SCT-004")
+    result = compute_routes(sct004, catalog["ports"], catalog["services"],
+                            {"ready_at": sct004["documents_ready_at"]}, scenario_profile("none"),
+                            SIMULATION_NOW)
+    used = {leg["service_id"] for route in result["alternatives"] for leg in route["legs"]}
+    assert used & {"rail-kz-tm", "sea-tkm", "sea-aktau"}
+
+
+def test_closure_reroutes_makhachkala_shipment_via_amirabad():
+    from backend.app.data import SIMULATION_NOW, load_demo_data
+
+    catalog = load_demo_data()
+    sct001 = next(s for s in catalog["shipments"] if s["id"] == "SCT-001")
+    result = compute_routes(sct001, catalog["ports"], catalog["services"],
+                            {"ready_at": "2026-11-12T12:00:00Z"}, scenario_profile("closure"),
+                            SIMULATION_NOW)
+    assert result["current_route"]["feasible"] is False
+    assert result["alternatives"]
+    east = [alt for alt in result["alternatives"]
+            if [leg["service_id"] for leg in alt["legs"]] == ["sea-mak-amirabad", "rail-amirabad"]]
+    assert east and east[0]["feasible"] is True
+    assert east[0]["legs"][0]["destination_id"] == "amirabad"
