@@ -841,7 +841,7 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
 def load_demo_data(seed: int = SEED) -> dict[str, Any]:
     """Return the frozen catalog, demo shipments and seeded history.
 
-    The catalog and three shipments are stable across seeds.  Only the synthetic
+    The catalog and the demo shipments are stable across seeds.  Only the synthetic
     history depends on ``seed``, and repeated calls with the same seed are
     byte-equivalent.  Returned nested values are copies so callers cannot mutate
     the module-level catalog.

@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 # Only the known variable names below are accepted; values are taken verbatim (no quotes,
 # no expansion); variables already set in the environment take precedence.
 if [[ -f .env ]]; then
-  env_names='DEMO_BROKER_TOKEN|DEMO_REVIEWER_TOKEN|DEMO_DISABLE_DEFAULT_TOKENS|ENABLE_API_DOCS|ALLOWED_HOSTS|MAX_BODY_BYTES|RATE_LIMIT_PER_MINUTE|AUTH_FAIL_LIMIT|AUTH_FAIL_WINDOW_SECONDS|AUDIT_HMAC_KEY|DATABASE_PATH'
+  env_names='DEMO_BROKER_TOKEN|DEMO_REVIEWER_TOKEN|DEMO_DISABLE_DEFAULT_TOKENS|ENABLE_API_DOCS|ALLOWED_HOSTS|MAX_BODY_BYTES|RATE_LIMIT_PER_MINUTE|AUTH_FAIL_LIMIT|AUTH_FAIL_WINDOW_SECONDS|AUDIT_HMAC_KEY|LEDGER_WITNESS_KEYS|DATABASE_PATH'
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%$'\r'}"
     [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
