@@ -15,7 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from . import data, hubs, ledger, preclearance, predictive, routing, security, summary
+from . import data, graphdb, hubs, ledger, preclearance, predictive, routing, security, summary
 from .schemas import (
     SIMULATION_NOW, CorridorSummary, AuditEntry, AuditVerification, ChooseRouteRequest,
     Dashboard, Declaration, Ruleset, DeclarationInput, IdempotencyKey, ModelMetrics,
@@ -117,7 +117,14 @@ def create_app(db_path: str | None = None) -> FastAPI:
         app.state.selected = {}
         preclearance.init_db(app.state.db)
         ledger.init_witnesses(app.state.db)  # simulated in-process witness nodes
-        yield
+        # Corridor topology: Neo4j when GRAPH_DB_URL is set and reachable, else networkx.
+        app.state.topology = graphdb.connect(app.state.catalog["ports"], app.state.catalog["services"])
+        try:
+            yield
+        finally:
+            close = getattr(app.state.topology, "close", None)
+            if close:
+                close()
 
     docs = _truthy("ENABLE_API_DOCS")
     app = FastAPI(title="Smart Caspian Transit — synthetic demo", lifespan=lifespan,
@@ -197,7 +204,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
         # forecast already carries any document-induced delay; changing both would
         # silently move the planned sailing and hide a missed connection.
         routes = routing.compute_routes(shipment(shipment_id), app.state.catalog["ports"],
-                                        app.state.catalog["services"], forecast, profile, SIMULATION_NOW)
+                                        app.state.catalog["services"], forecast, profile, SIMULATION_NOW,
+                                        topology=app.state.topology)
         selected_id = app.state.selected.get(shipment_id)
         if selected_id:
             candidate = next((r for r in [routes["current_route"], *routes["alternatives"]]
@@ -238,7 +246,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "simulation_now": SIMULATION_NOW, "demo_only": True}
+        return {"status": "ok", "simulation_now": SIMULATION_NOW, "demo_only": True,
+                "graph_backend": app.state.topology.name}
 
     @app.get("/api/catalog", dependencies=authenticated)
     def catalog():

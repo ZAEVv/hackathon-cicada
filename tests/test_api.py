@@ -217,7 +217,8 @@ def test_every_api_route_except_health_rejects_anonymous_requests(client):
 def test_health_is_public_and_reveals_nothing_new(client):
     response = client.get("/api/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "simulation_now": "2026-11-12T08:00:00Z", "demo_only": True}
+    assert response.json() == {"status": "ok", "simulation_now": "2026-11-12T08:00:00Z", "demo_only": True,
+                               "graph_backend": "networkx"}
 
 
 def test_unknown_shipment_is_rejected_before_lookup_without_token(client):

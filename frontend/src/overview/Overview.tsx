@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import type { Dashboard, Detail, Port } from "../types";
 import {
+  api,
   cargoNames,
   date,
   fmt,
@@ -50,6 +51,28 @@ const SCENARIOS = [
 ] as const;
 
 type Sort = "id" | "risk" | "eta";
+
+// Which store answered the route topology (see /api/health): Neo4j or the
+// in-memory networkx fallback. Public endpoint, fetched once.
+const GRAPH_BACKENDS: Record<string, string> = {
+  neo4j: "Neo4j (Cypher)",
+  networkx: "networkx (в памяти)",
+};
+function useGraphBackend() {
+  const [backend, setBackend] = useState("");
+  useEffect(() => {
+    let active = true;
+    api<{ graph_backend?: string }>("/health")
+      .then((h) => {
+        if (active) setBackend(GRAPH_BACKENDS[h.graph_backend ?? ""] ?? "");
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+  return backend;
+}
 
 // Stagger index for the entrance animation.
 const order = (n: number) => ({ "--i": n }) as React.CSSProperties;
@@ -99,6 +122,7 @@ export function Overview({
   const [showLoad, setShowLoad] = useState(true);
   const [hubHour, setHubHour] = useState(0);
   const hub = useHubForecast(token, selected, dashboard);
+  const graphBackend = useGraphBackend();
   const listRef = useRef<HTMLDivElement>(null);
 
   // The bell in the top bar asks for the risky shipments first.
@@ -940,7 +964,8 @@ export function Overview({
                 {d.scenario.wave_height_m != null &&
                   ` · волнение сценария: ${fmt(d.scenario.wave_height_m, 1)} м`}{" "}
                 · прогноз: {translate(d.prediction.data_source)},{" "}
-                {d.prediction.model_version}. Расписание и показатели
+                {d.prediction.model_version}
+                {graphBackend && ` · граф маршрутов: ${graphBackend}`}. Расписание и показатели
                 демонстрационные.
               </span>
             </div>
