@@ -25,7 +25,7 @@ Reviewed independently: `SOURCE_CASE_2.md`, `CONTRACTS.md`, `QA.md`, README, all
 
 1. Display a submitted declaration with shipper `Saved exporter`.
 2. Change the editable shipper field to `UNSAVED DIFFERENT EXPORTER`.
-3. The “Принять в демо” button remains enabled; click it.
+3. The “Принять” button remains enabled; click it.
 4. Browser sends only `{decision: "accepted", comment: ""}`. The submitted stored payload is accepted, and the visible shipper silently changes back to `Saved exporter`.
 
 Observed output: `DIRTY_REVIEW_BUTTON_ENABLED true`; `FIELD_AFTER_ACCEPT Saved exporter`.
