@@ -579,11 +579,12 @@ export function Overview({
                 setHubHour(h);
               }}
               onSelect={onSelect}
+              index={4}
             />
 
             <section
               className="card timeline-card reveal"
-              style={order(4)}
+              style={order(5)}
             >
               <div className="card-heading">
                 <div>

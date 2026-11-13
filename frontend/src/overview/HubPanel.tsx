@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { Gauge, Pause, Play, TriangleAlert } from "lucide-react";
 import type { HubForecast, HubPoint } from "../types";
 import { api, date, fmt, hours, lookup, scenarios, translate } from "../lib";
 import { reducedMotion } from "../theme";
+import { CountUp } from "../motion";
 
 export const HUB_STEP = 3;
 
@@ -103,7 +104,7 @@ export function HubTimeBar({
       {!reducedMotion() && (
         <button
           type="button"
-          className="icon-btn hub-play"
+          className={"icon-btn hub-play" + (playing ? " on" : "")}
           onClick={() => setPlaying((v) => !v)}
           aria-label={playing ? "Пауза" : "Проиграть прогноз на 72 часа"}
           title={playing ? "Пауза" : "Проиграть прогноз"}
@@ -127,7 +128,7 @@ export function HubTimeBar({
         />
       </label>
       <div className="hub-when" aria-live="off">
-        <strong>
+        <strong key={hour} className="hub-tick">
           +{hour} ч · {date(atOffset(forecast, hour))}
         </strong>
         <small className={hot ? "hub-high" : ""}>
@@ -148,6 +149,7 @@ export function HubPanel({
   short,
   onHour,
   onSelect,
+  index = 0,
 }: {
   forecast: HubForecast | null;
   error: string;
@@ -156,11 +158,13 @@ export function HubPanel({
   short: (id: string) => string;
   onHour: (hour: number) => void;
   onSelect: (id: string) => void;
+  index?: number;
 }) {
   const [all, setAll] = useState(false);
+  const order = { "--i": index } as CSSProperties;
   if (!forecast)
     return (
-      <section className="card hub-card">
+      <section className="card hub-card reveal" style={order}>
         <div className="card-heading">
           <div>
             <h3>Узкие места · 72 ч</h3>
@@ -182,8 +186,9 @@ export function HubPanel({
   const buckets: number[] = [];
   for (let h = 0; h < forecast.horizon_hours; h += HUB_STEP) buckets.push(h);
   const regional = forecast.regional_scenario;
+  const nowIdx = Math.max(0, Math.min(buckets.length - 1, Math.floor(hour / HUB_STEP)));
   return (
-    <section className="card hub-card">
+    <section className="card hub-card reveal" style={order}>
       <div className="card-heading">
         <div>
           <h3>Узкие места · 72 ч</h3>
@@ -212,12 +217,13 @@ export function HubPanel({
         role="group"
         aria-label="Загрузка узлов по трёхчасовым интервалам"
       >
-        {forecast.hubs.map((hub) => (
-          <div className="hub-heat-row" key={hub.port_id}>
+        {forecast.hubs.map((hub, row) => (
+          <div className="hub-heat-row" key={hub.port_id} style={{ "--r": row } as CSSProperties}>
             <span className="hub-heat-name" title={name(hub.port_id)}>
               {short(hub.port_id)}
             </span>
             <div className="hub-heat-cells">
+              <span className="hub-heat-now" style={{ "--idx": nowIdx, "--n": buckets.length } as CSSProperties} aria-hidden="true" />
               {buckets.map((start) => {
                 const slice = hub.points.filter(
                   (p) =>
@@ -249,7 +255,7 @@ export function HubPanel({
               })}
             </div>
             <span className={"hub-heat-peak hub-" + hubTone(hub.peak_utilization, forecast)}>
-              {percent(hub.peak_utilization)}
+              <CountUp value={Math.round(hub.peak_utilization * 100)} />%
             </span>
           </div>
         ))}
@@ -267,10 +273,11 @@ export function HubPanel({
 
       {windows.length ? (
         <ul className="hub-list">
-          {shown.map((w) => (
+          {shown.map((w, i) => (
             <li
               key={w.port_id + w.start_at}
               className={"hub-item hub-" + (w.severity === "high" ? "high" : "medium")}
+              style={{ "--i": i % 4 } as CSSProperties}
             >
               <button
                 type="button"
@@ -280,7 +287,7 @@ export function HubPanel({
               >
                 <span className="hub-item-top">
                   <strong>{name(w.port_id)}</strong>
-                  <b>{percent(w.peak_utilization)}</b>
+                  <b><CountUp value={Math.round(w.peak_utilization * 100)} />%</b>
                 </span>
                 <span className="hub-item-when">
                   {date(w.start_at)} — {date(w.end_at)} · через{" "}
@@ -291,6 +298,7 @@ export function HubPanel({
                   {w.reasons.map(translate).join(" · ")}
                 </span>
               </button>
+              <span className="hub-item-bar" style={{ "--p": Math.min(1, w.peak_utilization) } as CSSProperties} aria-hidden="true" />
               {w.shipment_ids.length > 0 && (
                 <span className="hub-item-ships">
                   <small>Затронуты:</small>

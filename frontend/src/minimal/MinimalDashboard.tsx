@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
+import { CountUp } from "../motion";
 import {
   Clock3,
   Container,
@@ -31,7 +32,8 @@ const statusMeta = {
 type KpiDef = {
   label: string;
   key: keyof CorridorSummary["kpis"];
-  format: (v: number) => string;
+  digits: number;
+  unit?: string;
   // Delta text and whether an increase is an improvement.
   delta: (k: SummaryKpi) => string;
   upIsGood: boolean;
@@ -44,28 +46,29 @@ const kpiDefs: KpiDef[] = [
   {
     label: "Перевозок за период",
     key: "shipments",
-    format: (v) => fmt(v),
+    digits: 0,
     delta: (k) => (k.delta_pct == null ? "—" : signed(k.delta_pct, 1, "%")),
     upIsGood: true,
   },
   {
     label: "Вовремя доставлено",
     key: "on_time_pct",
-    format: (v) => `${fmt(v, 1)}%`,
+    digits: 1,
+    unit: "%",
     delta: (k) => signed(k.delta ?? 0, 1, " п.п."),
     upIsGood: true,
   },
   {
     label: "Выбросы CO₂e, т",
     key: "co2e_tonnes",
-    format: (v) => fmt(v, 1),
+    digits: 1,
     delta: (k) => (k.delta_pct == null ? "—" : signed(k.delta_pct, 1, "%")),
     upIsGood: false,
   },
   {
     label: "Средняя задержка, ч",
     key: "avg_delay_hours",
-    format: (v) => fmt(v, 1),
+    digits: 1,
     delta: (k) => signed(k.delta ?? 0, 1, " ч"),
     upIsGood: false,
   },
@@ -173,7 +176,7 @@ export function MinimalDashboard({ token }: { token?: string }) {
                   <span className="md-muted">{def.label}</span>
                   {k ? (
                     <>
-                      <strong>{def.format(k.value)}</strong>
+                      <strong><CountUp value={k.value} digits={def.digits} />{def.unit}</strong>
                       {hasDelta ? (
                         <span className={"md-delta " + (good ? "up" : "down")}>
                           <Trend size={14} aria-hidden /> {def.delta(k)}
@@ -218,7 +221,7 @@ export function MinimalDashboard({ token }: { token?: string }) {
                         className="md-grid-line"
                       />
                     ))}
-                    <path d={linePath(points)} className="md-line" />
+                    <path d={linePath(points)} pathLength={1} className="md-line" />
                     {points.map((p, i) => (
                       <circle key={i} cx={p.x} cy={p.y} r={3.5} className="md-point">
                         <title>{`${weekLabel(ready.weekly[i].week_start)}: ${fmt(series[i], 1)} т`}</title>
@@ -255,6 +258,7 @@ export function MinimalDashboard({ token }: { token?: string }) {
                             className={"md-seg-arc " + modeMeta[m.mode].cls}
                             strokeDasharray={`${len} ${C - len}`}
                             strokeDashoffset={-offset}
+                            style={{ "--circumference": C } as CSSProperties}
                             transform="rotate(-90 80 80)"
                           />
                         );
@@ -306,10 +310,10 @@ export function MinimalDashboard({ token }: { token?: string }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {ready.recent_shipments.map((s) => {
+                    {ready.recent_shipments.map((s, i) => {
                       const st = statusMeta[s.status] ?? { label: s.status, tone: "warn" };
                       return (
-                        <tr key={s.id}>
+                        <tr key={s.id} style={{ "--i": i } as CSSProperties}>
                           <td className="mono">{s.id}</td>
                           <td>
                             {lookup(portShort, s.origin_id) ?? s.origin_name} →{" "}

@@ -360,3 +360,34 @@
     animation: none;
   }
 }
+
+@media (prefers-reduced-motion: no-preference) {
+  .md-line {
+    stroke-dasharray: 1;
+    animation: md-line-draw 0.9s ease-out both;
+  }
+  .md-point {
+    animation: md-appear 0.3s ease-out 0.65s both;
+  }
+  .md-seg-arc {
+    animation: md-donut-sweep 0.9s ease-out both;
+  }
+  .md-table tbody tr {
+    animation: md-appear 0.35s ease-out both;
+    animation-delay: calc(var(--i, 0) * 45ms);
+  }
+  .md-seg button {
+    transition: color 0.2s, background-color 0.2s;
+  }
+}
+@keyframes md-line-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes md-donut-sweep {
+  from { stroke-dasharray: 0 var(--circumference); }
+}
+@keyframes md-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

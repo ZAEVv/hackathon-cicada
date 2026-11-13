@@ -3010,6 +3010,7 @@ html.theme-liquid *:not(.tt-goo i) {
   transition:
     r 0.35s var(--ease-out),
     fill 0.3s,
+    fill-opacity 0.3s,
     stroke 0.3s;
 }
 .map-load .load-ring {
@@ -3114,6 +3115,7 @@ html.theme-liquid *:not(.tt-goo i) {
   text-overflow: ellipsis;
 }
 .hub-heat-cells {
+  position: relative;
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
@@ -3126,9 +3128,17 @@ html.theme-liquid *:not(.tt-goo i) {
   border-radius: 3px;
   background: var(--hub);
 }
-.hub-cell.now {
+.hub-heat-now {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: calc(var(--idx) * (100% + 2px) / var(--n));
+  width: calc((100% + 2px) / var(--n) - 2px);
   outline: 2px solid var(--text);
-  outline-offset: 1px;
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 1;
+  transition: left 0.3s var(--ease-out);
 }
 .hoverable .hub-cell:hover,
 .hub-cell:focus-visible {
@@ -3162,6 +3172,7 @@ html.theme-liquid *:not(.tt-goo i) {
   list-style: none;
 }
 .hub-item {
+  position: relative;
   display: grid;
   gap: 8px;
   padding: 10px 12px;
@@ -3178,6 +3189,51 @@ html.theme-liquid *:not(.tt-goo i) {
   background: none;
   color: inherit;
   text-align: left;
+}
+.hub-item-bar {
+  display: block;
+  height: 3px;
+  width: calc(var(--p) * 100%);
+  border-radius: 2px;
+  background: var(--hub);
+  transform-origin: left;
+}
+.hub-play.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Small, finite motion cues; content is visible without animation. */
+@media (prefers-reduced-motion: no-preference) {
+  .hub-bar, .hub-tick, .clearance-banner {
+    animation: reveal 0.3s var(--ease-out) both;
+  }
+  .hub-heat-row:not(.hub-heat-axis) {
+    animation: fade-in 0.35s ease-out both;
+    animation-delay: calc(var(--r, 0) * 35ms);
+  }
+  .hub-item, .ledger-chip, .issues p, .rule-list li, .stepper li {
+    animation: reveal 0.35s var(--ease-out) both;
+    animation-delay: calc(var(--i, 0) * 45ms);
+  }
+  .hub-item-bar {
+    animation: grow-x 0.65s var(--ease-out) both;
+  }
+  .stepper li > span, .rule-list li b {
+    animation: pop 0.3s var(--ease-out) both;
+    animation-delay: calc(var(--i, 0) * 45ms);
+  }
+  .stepper li, .stepper li > span, .rule-list li, .rule-list li b,
+  .ledger-chip, .hub-cell {
+    transition: color 0.2s, background-color 0.2s, border-color 0.2s, opacity 0.2s;
+  }
+  .toast.closing {
+    animation: toast-out 0.18s ease-in forwards;
+    pointer-events: none;
+  }
+}
+@keyframes toast-out {
+  to { opacity: 0; transform: translateY(8px); }
 }
 .hub-item-top {
   display: flex;

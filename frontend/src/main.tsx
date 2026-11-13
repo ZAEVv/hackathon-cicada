@@ -156,9 +156,11 @@ function App() {
     [ledgerView, setLedgerView] = useState<LedgerStatus | null>(null),
     [comment, setComment] = useState(""),
     [toast, setToast] = useState(""),
+    [toastClosing, setToastClosing] = useState(false),
     [ruleset, setRuleset] = useState<Ruleset | null>(null);
   const selectedRef = useRef("");
   const toastTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
   const settingsOpener = useRef<HTMLElement | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const dashboardRef = useRef<Dashboard | null>(null);
@@ -212,11 +214,17 @@ function App() {
     setSelected(id);
   };
   switchRef.current = switchShipment;
+  const dismissToast = () => {
+    window.clearTimeout(toastTimer.current);
+    setToastClosing(true);
+    toastTimer.current = window.setTimeout(() => setToast(""), reducedMotion() ? 0 : 180);
+  };
   const showToast = (msg: string) => {
     window.clearTimeout(toastTimer.current);
+    setToastClosing(false);
     setToast(msg);
     toastTimer.current = window.setTimeout(
-      () => setToast(""),
+      dismissToast,
       reducedMotion() ? 6000 : 4000,
     );
   };
@@ -689,7 +697,7 @@ function App() {
                   <div className="document-grid">
                     <section
                       className="card form-card reveal"
-                      style={{ "--i": 2 } as React.CSSProperties}
+                      style={{ "--i": 3 } as React.CSSProperties}
                     >
                       <div className="card-heading">
                         <div>
@@ -873,7 +881,7 @@ function App() {
                         <div className="issues">
                           <strong>Замечания проверки</strong>
                           {d.preclearance.validation.issues.map((issue, i) => (
-                            <p key={i}>
+                            <p key={i} style={{ "--i": i } as React.CSSProperties}>
                               {fieldLabel(issue.field, displayedForm.documents)}: {translate(issue.message)}
                             </p>
                           ))}
@@ -887,7 +895,7 @@ function App() {
                       />
                       <section
                         className="card review-card reveal"
-                        style={{ "--i": 3 } as React.CSSProperties}
+                        style={{ "--i": 4 } as React.CSSProperties}
                       >
                         <div className="card-heading">
                           <div>
@@ -930,7 +938,7 @@ function App() {
                       </section>
                       <section
                         className="card audit-card reveal"
-                        style={{ "--i": 4 } as React.CSSProperties}
+                        style={{ "--i": 5 } as React.CSSProperties}
                       >
                         <div className="card-heading">
                           <div>
@@ -987,10 +995,11 @@ function App() {
                               </span>
                             </div>
                             <div className="ledger-nodes">
-                              {ledgerView.nodes.map((n) => (
+                              {ledgerView.nodes.map((n, i) => (
                                 <span
                                   key={n.node_id}
                                   className={`ledger-chip ${n.state}`}
+                                  style={{ "--i": i } as React.CSSProperties}
                                   title={`${
                                     lookup(ledgerStateLabels, n.state) ?? n.state
                                   }${
@@ -1147,13 +1156,13 @@ function App() {
       </main>
       <div className="toast-area" aria-live="polite" role="status">
         {toast && (
-          <div className="toast" key={toast}>
+          <div className={"toast" + (toastClosing ? " closing" : "")} key={toast}>
             <Check size={16} aria-hidden="true" />
             <span>{toast}</span>
             <button
               type="button"
               aria-label="Закрыть уведомление"
-              onClick={() => setToast("")}
+              onClick={dismissToast}
             >
               <X size={14} />
             </button>
@@ -1262,8 +1271,8 @@ function ClearanceStepper({
         const state =
           i < current || (i === 3 && decided) ? "done" : i === current ? "current" : "upcoming";
         return (
-          <li key={label} className={state} aria-current={state === "current" ? "step" : undefined}>
-            <span>{state === "done" ? "✓" : i + 1}</span>
+          <li key={label} className={state} style={{ "--i": i } as React.CSSProperties} aria-current={state === "current" ? "step" : undefined}>
+            <span key={state}>{state === "done" ? "✓" : i + 1}</span>
             {label}
           </li>
         );
@@ -1298,11 +1307,11 @@ function ClearanceCard({
         <ShieldCheck size={19} className="muted" />
       </div>
       <ul className="rule-list">
-        {rules.map((rid) => {
+        {rules.map((rid, i) => {
           const r = results.find((x) => x.rule_id === rid);
           return (
-            <li key={rid} className={r ? (r.passed ? "pass" : "fail") : undefined}>
-              <b>{r ? (r.passed ? "✓" : "✗") : "·"}</b>
+            <li key={rid} style={{ "--i": i } as React.CSSProperties} className={r ? (r.passed ? "pass" : "fail") : undefined}>
+              <b key={r ? String(r.passed) : "pending"}>{r ? (r.passed ? "✓" : "✗") : "·"}</b>
               <span>
                 {rid}: {lookup(ruleLabels, rid) ?? rid}
               </span>
