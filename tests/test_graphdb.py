@@ -102,6 +102,7 @@ def test_query_failure_mid_run_falls_back_to_networkx(catalog, caplog):
         chains = topology.service_chains("rail_hub", "tehran", catalog["ports"], catalog["services"], ())
     assert sorted(chains) == sorted(legacy_chains(catalog["ports"], catalog["services"], "rail_hub", "tehran"))
     assert "using networkx" in caplog.text
+    assert topology.name == "networkx"  # /api/health reports the degraded backend
 
 
 def test_health_reports_networkx_backend(tmp_path):
@@ -175,10 +176,10 @@ def test_neo4j_routes_equal_networkx_for_all_shipments_and_scenarios(tmp_path, m
     calls = []
 
     def both(*args, topology=None, **kwargs):
-        assert topology is not None and topology.name == "neo4j"
+        assert topology is not None and isinstance(topology, graphdb.Neo4jTopology)
         via_neo4j = original(*args, topology=topology, **kwargs)
         via_networkx = original(*args, topology=graphdb.NetworkxTopology(), **kwargs)
-        assert not topology._failed  # the Cypher query answered, no silent fallback
+        assert topology.name == "neo4j"  # the Cypher query answered, no silent fallback
         assert via_neo4j == via_networkx
         calls.append((args[0]["id"], args[4]["kind"], len(via_neo4j["alternatives"])))
         return via_neo4j

@@ -113,13 +113,16 @@ class NetworkxTopology:
 class Neo4jTopology:
     """Topology stored in Neo4j and enumerated with Cypher."""
 
-    name = "neo4j"
-
     def __init__(self, driver, database: str | None = None):
         self.driver = driver
         self.database = database
         self._fallback = NetworkxTopology()
         self._failed = False
+
+    @property
+    def name(self) -> str:
+        # What answered the most recent query: "networkx" while Neo4j is failing.
+        return "networkx" if self._failed else "neo4j"
 
     def sync(self, ports: list[dict], services: list[dict]) -> None:
         """Idempotently upsert the catalog (safe to run on every start)."""
@@ -156,7 +159,9 @@ class Neo4jTopology:
                                type(exc).__name__)
                 self._failed = True
             return self._fallback.service_chains(origin, destination, ports, services, blocked)
-        self._failed = False
+        if self._failed:
+            logger.warning("Neo4j path queries answered again; graph backend: neo4j")
+            self._failed = False
         known = {s["id"] for s in services}
         # The DB mirrors the catalog loaded at startup; ignore anything the caller lacks.
         return [chain for chain in chains if all(sid in known for sid in chain)]
