@@ -29,10 +29,11 @@ The ``disclaimer`` returned by ``verify_audit`` is deliberately unchanged in
 both modes (frozen wire contract).  Even keyed, verification only proves that
 entries were written by a holder of the key.
 
-Witness anchoring (simulated distributed ledger, see ``ledger.py``)
--------------------------------------------------------------------
+Witness anchoring (permissioned ledger prototype, see ``ledger.py``)
+--------------------------------------------------------------------
 After each state-change transaction commits, the new entry is offered to three
-witness nodes, each with its own SQLite file and key, which co-sign it only as
+witness nodes (separate network services when ``LEDGER_WITNESS_URLS`` is set,
+in-process otherwise), each with its own SQLite store and key, which co-sign it only as
 an append-only continuation of their own records (quorum 2 of 3).  A witness
 failure never fails the state change; the entry is then reported as "not
 anchored".  ``verify_audit`` additionally compares the local chain with what a
@@ -49,9 +50,11 @@ Now detected (when a quorum of witnesses holds records for the shipment):
 
 Still NOT detected / limitations of this prototype:
 
-* All nodes run in the same process on the same host and disk: anyone who can
-  rewrite the main database can usually rewrite or delete the witness files
-  too, and the default witness keys are public demo values.  Real
+* In-process mode: all nodes run in the same process on the same host and
+  disk, so anyone who can rewrite the main database can usually rewrite or
+  delete the witness files too.  Network mode separates processes, databases
+  and containers, but one operator still runs all three nodes here, keys are
+  symmetric, and the default witness keys are public development values.  Real
   independence needs nodes operated by different parties.
 * Entries appended while fewer than two witnesses accept them are only
   locally protected (``ledger.status == "not_anchored"``); with fewer than

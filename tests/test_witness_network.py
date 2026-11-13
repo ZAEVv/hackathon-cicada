@@ -22,8 +22,8 @@ from backend.app.schemas import LedgerStatus
 from backend.app.witness_node import create_witness_app
 
 NOW = "2026-11-12T08:00:00Z"
-BROKER = {"id": "demo-broker", "role": "broker"}
-REVIEWER = {"id": "demo-reviewer", "role": "reviewer"}
+BROKER = {"id": "dev-broker", "role": "broker"}
+REVIEWER = {"id": "dev-reviewer", "role": "reviewer"}
 SHIPMENT = {"id": "SCT-001", "mass_kg": 20000, "container_id": "C1"}
 PAYLOAD = {"shipper": "Exporter", "consignee": "Importer", "description": "Parts",
            "mass_kg": 20000, "value_usd": 100, "origin_country": "RU", "hs_code": "123456",
@@ -64,7 +64,7 @@ def dead_url():
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
     for name in (pc.AUDIT_KEY_ENV, ledger.KEYS_ENV, ledger.URLS_ENV, ledger.TIMEOUT_ENV,
-                 "DEMO_BROKER_TOKEN", "DEMO_REVIEWER_TOKEN", "DEMO_DISABLE_DEFAULT_TOKENS"):
+                 "BROKER_TOKEN", "REVIEWER_TOKEN", "DISABLE_DEFAULT_TOKENS"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv(ledger.TIMEOUT_ENV, "1")
 
@@ -131,26 +131,26 @@ def test_quorum_with_three_network_nodes(db, nodes):
 
 def test_one_node_down_still_anchored(db, nodes):
     pc.save_declaration(db, SHIPMENT, copy.deepcopy(PAYLOAD), BROKER, NOW)
-    nodes["servers"]["customs-ir"].stop()
+    nodes["servers"]["witness-2"].stop()
     pc.validate_declaration(db, SHIPMENT, BROKER, NOW)
     result = pc.verify_audit(db, SHIPMENT["id"])
     assert result["valid"] and result["ledger"]["status"] == "anchored"
     assert result["ledger"]["nodes_available"] == 2 and result["ledger"]["attested_sequence"] == 2
     status, by_node = states(db)
-    assert by_node == {"customs-ru": "in_sync", "customs-ir": "unavailable", "port-operator": "in_sync"}
-    down = next(n for n in status["nodes"] if n["node_id"] == "customs-ir")
+    assert by_node == {"witness-1": "in_sync", "witness-2": "unavailable", "witness-3": "in_sync"}
+    down = next(n for n in status["nodes"] if n["node_id"] == "witness-2")
     assert down["available"] is False and down["error"] == "unreachable"
 
 
 def test_two_nodes_down_not_anchored_but_local_write_succeeds(db, nodes):
     pc.save_declaration(db, SHIPMENT, copy.deepcopy(PAYLOAD), BROKER, NOW)
-    nodes["configure"](**{"customs-ru": dead_url(), "port-operator": dead_url()})
+    nodes["configure"](**{"witness-1": dead_url(), "witness-3": dead_url()})
     assert pc.verify_audit(db, SHIPMENT["id"])["ledger"]["status"] == "no_quorum"
     assert ledger.anchor(db, SHIPMENT["id"], pc.get_audit(db, SHIPMENT["id"])[0])["anchored"] is False
     validated = pc.validate_declaration(db, SHIPMENT, BROKER, NOW)
     assert validated["status"] == "ready" and len(pc.get_audit(db, SHIPMENT["id"])) == 2
     _, by_node = states(db)
-    assert by_node == {"customs-ru": "unavailable", "customs-ir": "in_sync", "port-operator": "unavailable"}
+    assert by_node == {"witness-1": "unavailable", "witness-2": "in_sync", "witness-3": "unavailable"}
     # Nodes come back: they hold only entry 1, so entry 2 stays reported as not anchored.
     nodes["configure"]()
     result = pc.verify_audit(db, SHIPMENT["id"])
@@ -163,7 +163,7 @@ def test_slow_node_times_out_and_calls_run_in_parallel(db, nodes, monkeypatch):
     hanging = [socket.socket() for _ in range(2)]  # accept TCP but never answer
     try:
         urls = {}
-        for node, sock in zip(("customs-ru", "port-operator"), hanging):
+        for node, sock in zip(("witness-1", "witness-3"), hanging):
             sock.bind(("127.0.0.1", 0))
             sock.listen(8)
             urls[node] = "http://127.0.0.1:%d" % sock.getsockname()[1]
@@ -173,7 +173,7 @@ def test_slow_node_times_out_and_calls_run_in_parallel(db, nodes, monkeypatch):
         elapsed = time.monotonic() - started
         assert elapsed < 1.4  # two 0.5 s timeouts in parallel, not in sequence
         status, by_node = states(db)
-        assert status["status"] == "no_quorum" and by_node["customs-ir"] == "in_sync"
+        assert status["status"] == "no_quorum" and by_node["witness-2"] == "in_sync"
         assert {n["error"] for n in status["nodes"] if not n["available"]} == {"timeout"}
     finally:
         for sock in hanging:
@@ -217,18 +217,18 @@ def test_tampered_reply_in_transit_is_rejected(db, nodes):
             record["entry_hash"] = "f" * 64
         return json.dumps(body).encode()
 
-    mitm = Mitm(nodes["urls"]["customs-ru"], forge)
+    mitm = Mitm(nodes["urls"]["witness-1"], forge)
     try:
-        nodes["configure"](**{"customs-ru": mitm.server.url})
-        outcome_before = len(node_rows(nodes["paths"]["customs-ru"]))
+        nodes["configure"](**{"witness-1": mitm.server.url})
+        outcome_before = len(node_rows(nodes["paths"]["witness-1"]))
         pc.save_declaration(db, SHIPMENT, copy.deepcopy(PAYLOAD), BROKER, NOW)
         # The real node stored the record, but its (altered) reply was not counted.
-        assert len(node_rows(nodes["paths"]["customs-ru"])) == outcome_before + 1
+        assert len(node_rows(nodes["paths"]["witness-1"])) == outcome_before + 1
         entry = pc.get_audit(db, SHIPMENT["id"])[0]
-        nodes["configure"](**{"customs-ru": mitm.server.url})
+        nodes["configure"](**{"witness-1": mitm.server.url})
         status, by_node = states(db)
-        assert by_node == {"customs-ru": "invalid_signature", "customs-ir": "in_sync", "port-operator": "in_sync"}
-        bad = next(n for n in status["nodes"] if n["node_id"] == "customs-ru")
+        assert by_node == {"witness-1": "invalid_signature", "witness-2": "in_sync", "witness-3": "in_sync"}
+        bad = next(n for n in status["nodes"] if n["node_id"] == "witness-1")
         assert bad["error"] == "bad_reply" and bad["signature_valid"] is False
         assert status["status"] == "anchored"  # the two honest nodes still form a quorum
         assert entry["hash"] != "f" * 64
@@ -239,17 +239,17 @@ def test_tampered_reply_in_transit_is_rejected(db, nodes):
 def test_lying_node_records_are_reported_as_divergence(db, nodes):
     lifecycle(db)
     # The node operator rewrites its own store (the reply is authentic, the records are not).
-    with contextlib.closing(__import__("sqlite3").connect(nodes["paths"]["port-operator"])) as conn:
+    with contextlib.closing(__import__("sqlite3").connect(nodes["paths"]["witness-3"])) as conn:
         with conn:
             conn.execute("UPDATE attestations SET entry_hash = ? WHERE sequence = 2", ("e" * 64,))
     status, by_node = states(db)
-    assert by_node["port-operator"] == "invalid_signature" and status["status"] == "anchored"
+    assert by_node["witness-3"] == "invalid_signature" and status["status"] == "anchored"
     # Two lying nodes: no quorum of valid records, the API never trusts them.
-    with contextlib.closing(__import__("sqlite3").connect(nodes["paths"]["customs-ru"])) as conn:
+    with contextlib.closing(__import__("sqlite3").connect(nodes["paths"]["witness-1"])) as conn:
         with conn:
             conn.execute("DELETE FROM attestations WHERE sequence > 1")
     status, by_node = states(db)
-    assert by_node["customs-ru"] == "behind" and status["status"] == "not_anchored"
+    assert by_node["witness-1"] == "behind" and status["status"] == "not_anchored"
 
 
 def post(url, path, body, headers=None):
@@ -270,12 +270,12 @@ def signed_headers(key, method, path, body, timestamp=None, nonce="ab" * 16):
 
 
 def test_unauthenticated_and_forged_writes_are_refused(nodes):
-    url, path = nodes["urls"]["customs-ru"], nodes["paths"]["customs-ru"]
+    url, path = nodes["urls"]["witness-1"], nodes["paths"]["witness-1"]
     record = {"shipment_id": "SCT-001", "sequence": 1, "entry_hash": "a" * 64,
               "previous_hash": "0" * 64, "at": NOW}
-    key = ledger.node_key("customs-ru")
+    key = ledger.node_key("witness-1")
     assert post(url, "/attest", record) == 401  # no credentials at all
-    wrong = signed_headers(ledger.node_key("customs-ir"), "POST", "/attest", record)
+    wrong = signed_headers(ledger.node_key("witness-2"), "POST", "/attest", record)
     assert post(url, "/attest", record, wrong) == 401  # another node's key
     stale = signed_headers(key, "POST", "/attest", record, timestamp=int(time.time()) - 3600)
     assert post(url, "/attest", record, stale) == 401  # outside the clock-skew window
@@ -293,26 +293,26 @@ def test_unauthenticated_and_forged_writes_are_refused(nodes):
         urllib.request.urlopen(url + "/records/SCT-001", timeout=5)
     assert excinfo.value.code == 401
     with urllib.request.urlopen(url + "/health", timeout=5) as response:
-        assert json.loads(response.read()) == {"node_id": "customs-ru", "status": "ok"}
+        assert json.loads(response.read()) == {"node_id": "witness-1", "status": "ok"}
 
 
 def test_key_mismatch_is_reported_as_rejected(db, nodes, monkeypatch):
-    monkeypatch.setenv(ledger.KEYS_ENV, "customs-ir=a-different-key-held-by-the-api")
+    monkeypatch.setenv(ledger.KEYS_ENV, "witness-2=a-different-key-held-by-the-api")
     pc.save_declaration(db, SHIPMENT, copy.deepcopy(PAYLOAD), BROKER, NOW)
     status, by_node = states(db)
-    assert by_node["customs-ir"] == "unavailable" and status["status"] == "anchored"
-    assert next(n for n in status["nodes"] if n["node_id"] == "customs-ir")["error"] == "rejected"
-    assert node_rows(nodes["paths"]["customs-ir"]) == []
+    assert by_node["witness-2"] == "unavailable" and status["status"] == "anchored"
+    assert next(n for n in status["nodes"] if n["node_id"] == "witness-2")["error"] == "rejected"
+    assert node_rows(nodes["paths"]["witness-2"]) == []
 
 
 def test_url_configuration(monkeypatch):
     monkeypatch.setenv(ledger.URLS_ENV, "http://w1:8100, http://w2:8100/ ,https://w3")
-    assert ledger._remote_urls() == {"customs-ru": "http://w1:8100", "customs-ir": "http://w2:8100",
-                                     "port-operator": "https://w3"}
-    monkeypatch.setenv(ledger.URLS_ENV, "port-operator=http://c,customs-ru=http://a,customs-ir=http://b")
-    assert ledger._remote_urls()["port-operator"] == "http://c"
-    for bad in ("http://a,http://b", "ftp://a,http://b,http://c", "customs-ru=http://a,customs-ir=http://b",
-                "http://user:pw@a,http://b,http://c", "customs-ru=http://a,customs-ru=http://b,customs-ir=http://c"):
+    assert ledger._remote_urls() == {"witness-1": "http://w1:8100", "witness-2": "http://w2:8100",
+                                     "witness-3": "https://w3"}
+    monkeypatch.setenv(ledger.URLS_ENV, "witness-3=http://c,witness-1=http://a,witness-2=http://b")
+    assert ledger._remote_urls()["witness-3"] == "http://c"
+    for bad in ("http://a,http://b", "ftp://a,http://b,http://c", "witness-1=http://a,witness-2=http://b",
+                "http://user:pw@a,http://b,http://c", "witness-1=http://a,witness-1=http://b,witness-2=http://c"):
         monkeypatch.setenv(ledger.URLS_ENV, bad)
         with pytest.raises(RuntimeError) as excinfo:
             ledger._remote_urls()
@@ -323,10 +323,10 @@ def test_url_configuration(monkeypatch):
 
 def test_api_ledger_endpoint_in_network_mode(tmp_path, nodes):
     with TestClient(create_app(str(tmp_path / "demo.sqlite3"))) as client:
-        headers = {"Authorization": "Bearer demo-broker-token"}
+        headers = {"Authorization": "Bearer dev-broker-token"}
         body = client.get("/api/shipments/SCT-001/ledger", headers=headers).json()
         assert body["mode"] == "network" and body["status"] == "anchored" and body["nodes_available"] == 3
-        nodes["servers"]["port-operator"].stop()
+        nodes["servers"]["witness-3"].stop()
         body = client.get("/api/shipments/SCT-001/ledger", headers=headers).json()
         assert body["status"] == "anchored" and body["nodes_available"] == 2
         assert [n["state"] for n in body["nodes"]] == ["in_sync", "in_sync", "unavailable"]

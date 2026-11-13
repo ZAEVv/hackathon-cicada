@@ -2,7 +2,7 @@
 
 Run one process per node::
 
-    WITNESS_NODE_ID=customs-ru WITNESS_DB_PATH=/data/witness.sqlite3 \\
+    WITNESS_NODE_ID=witness-1 WITNESS_DB_PATH=/data/witness.sqlite3 \\
         python -m backend.app.witness_node
 
 The node owns its SQLite file and its signing key (``LEDGER_WITNESS_KEYS``

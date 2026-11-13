@@ -1,8 +1,8 @@
 """Permissioned witness ledger: three nodes that co-sign the audit chain head.
 
 This is a PROTOTYPE of a distributed-ledger anchor for the pre-clearance audit
-chain, not a production ledger.  Three witness nodes (``customs-ru``,
-``customs-ir``, ``port-operator``) each keep their own SQLite database and sign
+chain, not a production ledger.  Three witness nodes (``witness-1``,
+``witness-2``, ``witness-3``) each keep their own SQLite database and sign
 with their own HMAC-SHA256 key.  Two transports:
 
 * **Network mode** (``LEDGER_WITNESS_URLS`` set; the Docker Compose stack):
@@ -43,7 +43,7 @@ reported as ``invalid_signature``).
 
 Configuration
 -------------
-* ``LEDGER_WITNESS_KEYS="customs-ru=<key>,customs-ir=<key>,port-operator=<key>"``
+* ``LEDGER_WITNESS_KEYS="witness-1=<key>,witness-2=<key>,witness-3=<key>"``
   (any subset, each key at least 16 characters) overrides the deterministic,
   clearly labelled demo keys (NOT secret).  Keys are never logged or returned.
 * ``LEDGER_WITNESS_URLS`` -- either three URLs in node order
@@ -68,7 +68,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from urllib.parse import quote, urlsplit
 
-NODES = (("customs-ru", "Customs RU"), ("customs-ir", "Customs IR"), ("port-operator", "Port operator"))
+NODES = (("witness-1", "Customs"), ("witness-2", "Port"), ("witness-3", "Carrier"))
 QUORUM = 2
 KEYS_ENV = "LEDGER_WITNESS_KEYS"
 URLS_ENV = "LEDGER_WITNESS_URLS"
@@ -178,7 +178,7 @@ def disclaimer():
 
 
 def _keys():
-    keys = {node: f"demo-witness-key/{node}/NOT-A-SECRET".encode("ascii") for node, _ in NODES}
+    keys = {node: f"dev-witness-key/{node}/NOT-A-SECRET".encode("ascii") for node, _ in NODES}
     raw = os.environ.get(KEYS_ENV)
     if raw is not None and raw.strip():
         for part in raw.split(","):

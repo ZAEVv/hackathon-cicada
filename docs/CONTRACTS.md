@@ -185,14 +185,19 @@ results[{rule_id, passed, detail}]} is stored on the declaration and in the `sub
 All pass => status `auto_accepted` (demo decision, not customs release); otherwise `submitted`
 for the reviewer. Lists are illustrative demo parameters.
 
-Witness ledger (`backend/app/ledger.py`, prototype): after each committed audit entry, three
-in-process nodes `customs-ru`, `customs-ir`, `port-operator` (own SQLite `<db>.witness-<id>.sqlite3`,
-own HMAC-SHA256 key; `LEDGER_WITNESS_KEYS` overrides the non-secret demo keys) append
+Witness ledger (`backend/app/ledger.py`, `witness_node.py`, prototype): after each committed audit
+entry, three nodes `witness-1`, `witness-2`, `witness-3` (UI: Таможня, Порт, Перевозчик; own SQLite,
+own HMAC-SHA256 key; `LEDGER_WITNESS_KEYS` overrides the non-secret dev keys) append
 (shipment_id, sequence, entry_hash, previous_hash, at) only as the next record of their own chain.
 Anchored = accepted by >= 2 of 3. Node failure never blocks the local change. Verify compares the
 local chain with quorum-attested hashes: mismatch/truncation => `conflict` and
 `first_invalid_sequence`; unanchored tail => `not_anchored`; < 2 usable nodes => `no_quorum`;
-in-memory DB => `disabled`. Not a network: one process, one disk, symmetric keys.
+in-memory DB => `disabled`. With `LEDGER_WITNESS_URLS` (Docker) the nodes are separate HTTP services
+(`POST /attest`, `GET /records/{id}`, `GET /head/{id}`, `GET /health`), called in parallel with short
+timeouts; requests and replies are HMAC-authenticated (timestamp + single-use nonce). Without it the
+nodes run in-process (files `<db>.witness-<id>.sqlite3`). `LedgerStatus` adds `mode`
+(`network`/`in_process`) and per-node `error` (`timeout`/`unreachable`/`rejected`/`bad_reply`).
+Limits: one operator runs all nodes, symmetric keys, no BFT consensus.
 
 Submit idempotency stored transactionally under (actor.id, shipment_id, key), along with
 version/content hash and response JSON. Same key/same version returns original response without

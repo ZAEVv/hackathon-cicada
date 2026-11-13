@@ -51,6 +51,8 @@ import {
   fieldLabel,
   fmt,
   initialPayload,
+  ledgerChipLabels,
+  ledgerErrorLabels,
   ledgerNodeLabels,
   ledgerStateLabels,
   ledgerStatusNotes,
@@ -967,9 +969,15 @@ function App() {
                               <span>
                                 Распределённый реестр:{" "}
                                 {ledgerView.nodes_in_sync} из{" "}
-                                {ledgerView.nodes_total} узлов подтвердили ·
-                                кворум {ledgerView.quorum} из{" "}
-                                {ledgerView.nodes_total}
+                                {ledgerView.nodes_total} узлов подписали ·{" "}
+                                <b className="ledger-quorum">
+                                  кворум {ledgerView.quorum} из{" "}
+                                  {ledgerView.nodes_total}{" "}
+                                  {ledgerView.status === "no_quorum" ||
+                                  ledgerView.status === "disabled"
+                                    ? "не достигнут"
+                                    : "достигнут"}
+                                </b>
                                 {lookup(ledgerStatusNotes, ledgerView.status)
                                   ? ` · ${lookup(ledgerStatusNotes, ledgerView.status)}`
                                   : ""}
@@ -981,8 +989,12 @@ function App() {
                                   key={n.node_id}
                                   className={`ledger-chip ${n.state}`}
                                   style={{ "--i": i } as React.CSSProperties}
-                                  title={`${
+                                  title={`${n.node_id} · ${
                                     lookup(ledgerStateLabels, n.state) ?? n.state
+                                  }${
+                                    n.error
+                                      ? ` · ${lookup(ledgerErrorLabels, n.error) ?? n.error}`
+                                      : ""
                                   }${
                                     n.last_sequence != null
                                       ? ` · запись №${n.last_sequence}`
@@ -994,13 +1006,19 @@ function App() {
                                   }`}
                                 >
                                   <span className="ledger-dot" />
-                                  {lookup(ledgerNodeLabels, n.node_id) ?? n.label}
+                                  <span className="ledger-name">
+                                    {lookup(ledgerNodeLabels, n.node_id) ?? n.label}
+                                  </span>
+                                  <span className="ledger-state">
+                                    {lookup(ledgerChipLabels, n.state) ?? n.state}
+                                  </span>
                                 </span>
                               ))}
                             </div>
                             <p className="micro ledger-micro">
-                              Узлы моделируются в одном процессе; это прототип,
-                              не промышленный реестр.
+                              {ledgerView.mode === "network"
+                                ? "Узлы — отдельные сетевые сервисы со своими базами и ключами; один узел может быть недоступен без потери кворума. Прототип, не промышленный реестр."
+                                : "Узлы работают в одном процессе с API; это прототип, не промышленный реестр."}
                             </p>
                           </div>
                         )}

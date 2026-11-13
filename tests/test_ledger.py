@@ -27,7 +27,7 @@ NODE_IDS = [node for node, _ in ledger.NODES]
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for name in (pc.AUDIT_KEY_ENV, ledger.KEYS_ENV, "BROKER_TOKEN", "REVIEWER_TOKEN",
+    for name in (pc.AUDIT_KEY_ENV, ledger.KEYS_ENV, ledger.URLS_ENV, "BROKER_TOKEN", "REVIEWER_TOKEN",
                  "DISABLE_DEFAULT_TOKENS"):
         monkeypatch.delenv(name, raising=False)
 
@@ -128,25 +128,25 @@ def test_deleted_declaration_and_chain_is_invalid(db):
 
 def test_one_witness_deleted_still_valid_with_two_of_three(db):
     lifecycle(db)
-    remove_witness(db, "customs-ir")
+    remove_witness(db, "witness-2")
     result = pc.verify_audit(db, SHIPMENT["id"])
     assert result["valid"] and result["ledger"]["anchored"]
     assert result["ledger"]["nodes_available"] == 2 and result["ledger"]["nodes_in_sync"] == 2
     states = {n["node_id"]: n["state"] for n in pc.ledger_status(db, SHIPMENT["id"])["nodes"]}
-    assert states == {"customs-ru": "in_sync", "customs-ir": "unavailable", "port-operator": "in_sync"}
+    assert states == {"witness-1": "in_sync", "witness-2": "unavailable", "witness-3": "in_sync"}
     # The next write still reaches quorum; the re-created empty node refuses the
     # continuation and is reported as behind, not silently re-synced.
     pc.save_declaration(db, SHIPMENT, copy.deepcopy(PAYLOAD), BROKER, NOW)
     result = pc.verify_audit(db, SHIPMENT["id"])
     assert result["valid"] and result["ledger"]["status"] == "anchored"
     states = {n["node_id"]: n["state"] for n in pc.ledger_status(db, SHIPMENT["id"])["nodes"]}
-    assert states["customs-ir"] == "behind"
+    assert states["witness-2"] == "behind"
 
 
 def test_two_witnesses_deleted_is_not_anchored_but_flow_continues(db):
     pc.save_declaration(db, SHIPMENT, copy.deepcopy(PAYLOAD), BROKER, NOW)
-    remove_witness(db, "customs-ru")
-    remove_witness(db, "port-operator")
+    remove_witness(db, "witness-1")
+    remove_witness(db, "witness-3")
     assert pc.verify_audit(db, SHIPMENT["id"])["ledger"]["status"] == "no_quorum"
     validated = pc.validate_declaration(db, SHIPMENT, BROKER, NOW)  # local state change succeeds
     assert validated["status"] == "ready"
@@ -167,12 +167,12 @@ def test_witness_refuses_forked_append(db):
         assert ledger.witness_append(db, node, SHIPMENT["id"], 2, other, other, NOW) is None
         rows = raw_execute(ledger.witness_path(db, node), "SELECT sequence, entry_hash FROM attestations")
         assert rows == [(1, entry["hash"])]
-    assert ledger.witness_append(db, "customs-ru", SHIPMENT["id"], 2, other, entry["hash"], NOW)
+    assert ledger.witness_append(db, "witness-1", SHIPMENT["id"], 2, other, entry["hash"], NOW)
 
 
 def test_tampered_witness_record_fails_signature(db):
     lifecycle(db)
-    raw_execute(ledger.witness_path(db, "customs-ru"), "UPDATE attestations SET at = 'forged' WHERE sequence = 2")
+    raw_execute(ledger.witness_path(db, "witness-1"), "UPDATE attestations SET at = 'forged' WHERE sequence = 2")
     status = pc.ledger_status(db, SHIPMENT["id"])
     node = status["nodes"][0]
     assert node["state"] == "invalid_signature" and node["signature_valid"] is False
@@ -180,12 +180,12 @@ def test_tampered_witness_record_fails_signature(db):
 
 
 def test_key_override_and_no_key_material_in_responses(db, monkeypatch):
-    secret = "customs-ru-override-key-123456"
-    monkeypatch.setenv(ledger.KEYS_ENV, f"customs-ru={secret}")
+    secret = "witness-1-override-key-123456"
+    monkeypatch.setenv(ledger.KEYS_ENV, f"witness-1={secret}")
     lifecycle(db)
     text = json.dumps(pc.ledger_status(db, SHIPMENT["id"])) + json.dumps(pc.verify_audit(db, SHIPMENT["id"]))
     assert secret not in text and "NOT-A-SECRET" not in text
-    monkeypatch.setenv(ledger.KEYS_ENV, "customs-ru=short")
+    monkeypatch.setenv(ledger.KEYS_ENV, "witness-1=short")
     with pytest.raises(RuntimeError) as excinfo:
         pc.verify_audit(db, SHIPMENT["id"])
     assert "short" not in str(excinfo.value)
@@ -201,7 +201,7 @@ def test_failed_witness_does_not_break_local_write(db, monkeypatch):
 
 
 def test_memory_database_has_no_ledger():
-    assert ledger.witness_path(":memory:", "customs-ru") is None
+    assert ledger.witness_path(":memory:", "witness-1") is None
     assert ledger.compare(":memory:", "SCT-001", [])["status"] == "disabled"
 
 

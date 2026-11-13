@@ -3559,6 +3559,24 @@ main.stage[aria-busy="true"] button:disabled {
   border-color: color-mix(in srgb, var(--red) 32%, transparent);
   color: var(--red);
 }
+.ledger-chip.unavailable {
+  border-style: dashed;
+  color: var(--muted);
+}
+.ledger-name {
+  color: var(--text);
+  font-weight: 500;
+}
+.ledger-chip.unavailable .ledger-name {
+  color: var(--muted);
+}
+.ledger-state::before {
+  content: "· ";
+}
+.ledger-quorum {
+  font-weight: 600;
+  color: var(--text);
+}
 .ledger-micro {
   margin-top: 8px;
 }

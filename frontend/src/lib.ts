@@ -510,18 +510,31 @@ export const countries: Record<string, string> = {
   AZ: "Азербайджан",
   UZ: "Узбекистан",
 };
-// Witness-ledger node labels and chip states (simulated in-process nodes).
+// Witness-ledger nodes: names, short chip status and detailed tooltip state.
 export const ledgerNodeLabels: Record<string, string> = {
-  "customs-ru": "Таможня РФ",
-  "customs-ir": "Таможня Ирана",
-  "port-operator": "Оператор порта",
+  "witness-1": "Таможня",
+  "witness-2": "Порт",
+  "witness-3": "Перевозчик",
 };
-export const ledgerStateLabels: Record<string, string> = {
-  in_sync: "синхронизирован",
+export const ledgerChipLabels: Record<string, string> = {
+  in_sync: "подписал",
   behind: "отстаёт",
   diverged: "расхождение",
-  invalid_signature: "неверная подпись",
+  invalid_signature: "расхождение",
   unavailable: "недоступен",
+};
+export const ledgerStateLabels: Record<string, string> = {
+  in_sync: "подписал все записи",
+  behind: "отстаёт: подписал не все записи",
+  diverged: "расхождение: хеши не совпадают с журналом",
+  invalid_signature: "расхождение: подпись или ответ узла не прошли проверку",
+  unavailable: "узел недоступен",
+};
+export const ledgerErrorLabels: Record<string, string> = {
+  timeout: "нет ответа (таймаут)",
+  unreachable: "нет соединения",
+  rejected: "узел отклонил ключ",
+  bad_reply: "ответ узла изменён или повреждён",
 };
 export const ledgerStatusNotes: Record<string, string> = {
   not_anchored: "последние записи не закреплены",

@@ -251,7 +251,7 @@ export type CorridorSummary = {
   disclaimer: string;
 };
 
-// Simulated witness ledger (GET /api/shipments/{id}/ledger); nodes run in-process.
+// Witness ledger (GET /api/shipments/{id}/ledger); nodes are network services or in-process.
 export type LedgerNodeState =
   | "in_sync"
   | "behind"
@@ -267,6 +267,7 @@ export type LedgerNode = {
   signature_valid: boolean | null;
   in_sync: boolean;
   state: LedgerNodeState;
+  error?: "timeout" | "unreachable" | "rejected" | "bad_reply" | null;
 };
 export type LedgerStatus = {
   shipment_id: string;
@@ -279,6 +280,7 @@ export type LedgerStatus = {
   nodes_in_sync: number;
   attested_sequence: number;
   local_sequence: number;
+  mode?: "in_process" | "network";
   nodes: LedgerNode[];
   disclaimer: string;
 };
