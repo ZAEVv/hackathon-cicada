@@ -112,8 +112,8 @@ export const translations: Record<string, string> = {
     "Вероятность оценена по разбросу ошибок прогноза на синтетике; калибровка не гарантирована",
   "Synthetic classifier estimate; not guaranteed calibrated":
     "Оценка синтетического классификатора; калибровка не гарантирована",
-  "Readiness after demo cutoff": "Готовность после дедлайна",
-  "Readiness within demo cutoff": "Готовность до дедлайна",
+  "Readiness after cutoff": "Готовность после дедлайна",
+  "Readiness within cutoff": "Готовность до дедлайна",
   "Planned route": "Плановый маршрут",
   "Planned Caspian crossing": "Плановый переход через Каспий",
   "Next-departure recovery": "Восстановление на следующем рейсе",
@@ -418,6 +418,17 @@ export const ruleLabels: Record<string, string> = {
   R5: "Страна происхождения в списке разрешённых",
 };
 export const shortHash = (hash: string) => hash.slice(0, 12);
+
+// Honest weather provenance: live Open-Meteo with its own observation time,
+// the last live observation (cache), or the synthetic fallback.
+export function weatherSource(w: Detail["weather"]): string {
+  const at = /^\d{4}-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(w.observed_at);
+  const when = at ? `${at[2]}.${at[1]} ${at[3]} UTC` : w.observed_at;
+  const stale = w.stale ? ", устарели" : "";
+  if (w.source === "open-meteo") return `Open-Meteo, ${when}${stale}`;
+  if (w.source === "cache") return `последние данные Open-Meteo, ${when}${stale}`;
+  return w.fallback ? "резервные данные (Open-Meteo недоступен)" : "синтетические данные";
+}
 
 // Integration review: remaining backend strings shown in the UI (event
 // sources, validation issues, 404/409 error details, model disclaimer, audit

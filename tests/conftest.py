@@ -1,5 +1,11 @@
-"""Shared test setup: the suite runs the witness ledger in-process unless a test opts in."""
+"""Shared test setup: offline weather; witness ledger in-process unless a test opts in."""
+import os
+
 import pytest
+
+# The app defaults to live Open-Meteo weather; tests always use the synthetic
+# provider (tests/test_weather.py exercises the live path with a mocked HTTP layer).
+os.environ["WEATHER_PROVIDER"] = "synthetic"
 
 
 @pytest.fixture(autouse=True)

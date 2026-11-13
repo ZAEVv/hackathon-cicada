@@ -5,8 +5,10 @@ coordinates are not claims about real Caspian logistics schedules or availabilit
 The synthetic clock is fixed in the frozen contracts; no wall-clock time or network
 I/O is used unless ``get_weather(..., use_live=True)`` is explicitly requested.
 
-The live path (off by default, not reachable from the HTTP API, which only calls
-``get_weather(port_id)`` with catalog port ids) accepts only a 200 response whose
+The HTTP API takes current weather from ``weather.WeatherService`` (batched
+Open-Meteo forecast + marine requests with an in-memory TTL cache, falling back
+to the synthetic table below).  The single-port live path here
+(``use_live=True``, not used by the API) accepts only a 200 response whose
 final URL is still ``https://api.open-meteo.com/v1/forecast``, reads at most
 ``MAX_RESPONSE_BYTES``, and applies plausibility bounds to fetched and cached
 values.  ``cache_path`` is trusted caller configuration; the cache is read only
@@ -429,7 +431,7 @@ _SHIPMENTS: list[dict[str, Any]] = [
             "road-final",
         ],
         "queue_hours": 1.0,
-        "observed_delay_hours": 0.5,
+        "observed_delay_hours": 1.5,
         "documents_ready_at": "2026-11-12T17:00:00Z",
         "events": [
             _event(
@@ -445,7 +447,7 @@ _SHIPMENTS: list[dict[str, Any]] = [
                 "port_arrival",
                 "makhachkala",
                 "2026-11-12T15:00:00Z",
-                estimated_at="2026-11-12T15:30:00Z",
+                estimated_at="2026-11-12T16:30:00Z",
                 quality_flag="forecast",
             ),
             _event(
@@ -484,7 +486,7 @@ _SHIPMENTS: list[dict[str, Any]] = [
             "road-final",
         ],
         "queue_hours": 0.5,
-        "observed_delay_hours": 0.0,
+        "observed_delay_hours": 1.0,
         "documents_ready_at": "2026-11-13T09:00:00Z",
         "events": [
             _event(
@@ -500,7 +502,7 @@ _SHIPMENTS: list[dict[str, Any]] = [
                 "port_arrival",
                 "makhachkala",
                 "2026-11-13T08:00:00Z",
-                estimated_at="2026-11-13T08:20:00Z",
+                estimated_at="2026-11-13T09:00:00Z",
                 quality_flag="forecast",
             ),
             _event(
@@ -714,7 +716,10 @@ def _delay_hours(
 
     Normal, low-wind rows stay near zero.  Wind and precipitation are superlinear,
     congestion interacts with wind, and storm rows receive an additional penalty.
-    The noise is seeded and small relative to the weather effect.
+    The seeded noise is heteroscedastic: operations get less predictable as wind
+    and the terminal queue grow (and more so in a storm).  Unobserved incidents
+    (crane breakdowns, inspections, crew variance) are added separately by
+    ``_unobserved_delay_hours`` so this surface stays a function of model inputs.
     """
 
     base = (
@@ -734,7 +739,7 @@ def _delay_hours(
     storm_extra = 0.0
     if is_storm:
         storm_extra = 5.0 + 0.12 * max(0.0, wind_mps - 18.0) ** 1.2
-    sigma = 1.15 if is_storm else (0.65 if queue_hours > 5.0 else 0.35)
+    sigma = (0.25 + 0.035 * wind_mps + 0.06 * queue_hours) * (1.5 if is_storm else 1.0)
     value = (
         base
         + weather
@@ -744,6 +749,63 @@ def _delay_hours(
         + rng.gauss(0.0, sigma)
     )
     return round(max(0.0, value), 3)
+
+
+# Unobserved operational factors.  None of these are history columns or model
+# features, so they cap how well any model can do -- as on a real terminal.
+CRANE_BREAKDOWN_BASE_P = 0.04      # per handling; +1 pp per queue hour (wear, overtime)
+CRANE_BREAKDOWN_HOURS = (2.0, 9.0)
+INSPECTION_P = 0.12                # selective customs/phytosanitary inspection
+INSPECTION_GAMMA = (2.0, 0.9)      # shape, scale: mean 1.8 h, long right tail
+CREW_SIGMA_HOURS = 0.4             # shift handover, gang size, paperwork speed
+# The vessel's actual cargo cutoff also moves (late/early departure, berth
+# reshuffles).  It only affects whether the connection is missed.
+DEPARTURE_SLIP_SIGMA_HOURS = 2.0
+VESSEL_HELD_P, VESSEL_HELD_HOURS = 0.08, (2.0, 8.0)
+EARLY_CLOSE_P, EARLY_CLOSE_HOURS = 0.05, (1.0, 3.0)
+
+
+# Planner's buffer on top of the fair-weather plan, hours, per regime.
+BUFFER_HOURS = {
+    "storm": (-1.0, 5.0),
+    "congestion": (-0.5, 6.0),
+    "breezy": (0.0, 8.0),
+    "normal": (0.0, 10.0),
+}
+PLANNER_MAX_WIND_MPS = 10.0
+
+
+class _NoNoise(random.Random):
+    """A Random whose Gaussian draws are 0: the noise-free expected surface."""
+
+    def gauss(self, mu: float = 0.0, sigma: float = 1.0) -> float:  # noqa: ARG002
+        return mu
+
+
+_NO_NOISE = _NoNoise(0)
+
+
+def _unobserved_delay_hours(rng: random.Random, *, queue_hours: float) -> float:
+    """Extra delay from factors the model never sees (seeded, nonnegative mean)."""
+
+    extra = rng.gauss(0.0, CREW_SIGMA_HOURS)
+    if rng.random() < CRANE_BREAKDOWN_BASE_P + 0.01 * queue_hours:
+        extra += rng.uniform(*CRANE_BREAKDOWN_HOURS)
+    if rng.random() < INSPECTION_P:
+        extra += rng.gammavariate(*INSPECTION_GAMMA)
+    return extra
+
+
+def _departure_slip_hours(rng: random.Random) -> float:
+    """Shift of the real cutoff against the planned one (+ = more time)."""
+
+    slip = rng.gauss(0.0, DEPARTURE_SLIP_SIGMA_HOURS)
+    roll = rng.random()
+    if roll < VESSEL_HELD_P:
+        slip += rng.uniform(*VESSEL_HELD_HOURS)
+    elif roll < VESSEL_HELD_P + EARLY_CLOSE_P:
+        slip -= rng.uniform(*EARLY_CLOSE_HOURS)
+    return slip
 
 
 def _build_history(seed: int) -> list[dict[str, Any]]:
@@ -768,14 +830,14 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
             precipitation_mm = round(rng.uniform(4.0, 30.0), 1)
             queue_hours = round(rng.uniform(3.0, 12.0), 2)
             observed_delay_hours = round(rng.uniform(1.0, 6.0), 2)
-            hours_to_cutoff = round(rng.uniform(1.5, 8.0), 2)
+            buffer_hours = rng.uniform(*BUFFER_HOURS['storm'])
         elif roll < 0.22:
             regime = "congestion"
             wind_mps = round(rng.uniform(2.0, 9.0), 1)
             precipitation_mm = round(rng.uniform(0.0, 3.0), 1)
             queue_hours = round(rng.uniform(5.0, 14.0), 2)
             observed_delay_hours = round(rng.uniform(0.5, 4.0), 2)
-            hours_to_cutoff = round(rng.uniform(1.5, 18.0), 2)
+            buffer_hours = rng.uniform(*BUFFER_HOURS['congestion'])
         elif roll < 0.32:
             # Breezy/rainy but non-storm rows give the weather surface useful
             # intermediate values instead of a synthetic low/high-only gap.
@@ -784,7 +846,7 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
             precipitation_mm = round(rng.uniform(0.0, 8.0), 1)
             queue_hours = round(rng.uniform(1.0, 5.0), 2)
             observed_delay_hours = round(rng.uniform(0.0, 2.0), 2)
-            hours_to_cutoff = round(rng.uniform(4.0, 30.0), 2)
+            buffer_hours = rng.uniform(*BUFFER_HOURS['breezy'])
         else:
             regime = "normal"
             wind_mps = round(rng.uniform(1.0, 8.5), 1)
@@ -793,7 +855,7 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
             )
             queue_hours = round(rng.uniform(0.0, 3.5), 2)
             observed_delay_hours = round(rng.uniform(0.0, 1.5), 2)
-            hours_to_cutoff = round(rng.uniform(2.0, 72.0), 2)
+            buffer_hours = rng.uniform(*BUFFER_HOURS['normal'])
 
         mass_tonnes = round(rng.uniform(5.0, 35.0), 1)
         # Seeded sea state correlated with wind (drawn after all other fields so
@@ -805,6 +867,24 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
             ),
             2,
         )
+        # The booking was made days ahead on a fair-weather plan: the planner
+        # expects the noise-free delay for the current queue but at most a
+        # moderate wind, no rain and no storm, then adds a buffer.  Storms and
+        # incidents are therefore what breaks connections.
+        planned_wind = min(wind_mps, PLANNER_MAX_WIND_MPS)
+        planned_delay = _delay_hours(
+            is_storm=False,
+            queue_hours=queue_hours,
+            wind_mps=planned_wind,
+            precipitation_mm=0.0,
+            observed_delay_hours=observed_delay_hours,
+            mass_tonnes=mass_tonnes,
+            rng=_NO_NOISE,
+            wave_height_m=min(wave_height_m, estimate_wave_height_m(planned_wind)),
+        )
+        hours_to_cutoff = round(
+            max(1.0, queue_hours + planned_delay + buffer_hours), 2
+        )
         delay_hours = _delay_hours(
             is_storm=regime == "storm",
             queue_hours=queue_hours,
@@ -815,8 +895,14 @@ def _build_history(seed: int) -> list[dict[str, Any]]:
             rng=rng,
             wave_height_m=wave_height_m,
         )
+        delay_hours = round(
+            max(0.0, delay_hours + _unobserved_delay_hours(rng, queue_hours=queue_hours)), 3
+        )
+        # hours_to_cutoff is the planned slack the model sees; the label uses the
+        # real (slipped) cutoff, which is not known in advance.
         missed_connection = int(
-            observed_delay_hours + queue_hours + delay_hours > hours_to_cutoff
+            observed_delay_hours + queue_hours + delay_hours
+            > hours_to_cutoff + _departure_slip_hours(rng)
         )
         rows.append(
             {

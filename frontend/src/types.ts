@@ -113,6 +113,8 @@ export type Detail = {
     source: string;
     observed_at: string;
     stale: boolean;
+    fallback?: boolean;
+    wave_estimated?: boolean;
   };
   scenario: {
     kind: string;

@@ -286,7 +286,7 @@ Routes here cover remaining legs only. Frontend must not hardcode these numeric 
     "observed_at":"2026-11-12T08:00:00Z","stale":false},
   "scenario":{"kind":"none","arrival_delay_hours":0,"queue_extra_hours":0,"wind_mps":null,"wave_height_m":null,"blocked_service_ids":[]},
   "prediction":{"delay_hours":0.5,"ready_at":"2026-11-12T12:00:00Z","miss_probability":0.12,
-    "risk":"low","factors":["Low wind","Short terminal queue"],"model_version":"gbm-demo-v3","data_source":"synthetic"},
+    "risk":"low","factors":["Low wind","Short terminal queue"],"model_version":"gbm-v4","data_source":"synthetic"},
   "current_route":{
     "id":"sea-main@2026-11-12T18:00:00Z+road-final@2026-11-14T00:00:00Z",
     "label":"Planned Caspian crossing","feasible":true,"reason":null,"missed_connection":false,

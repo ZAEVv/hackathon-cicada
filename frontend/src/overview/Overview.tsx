@@ -36,6 +36,7 @@ import {
   scheduleStatus,
   shipmentTone,
   translate,
+  weatherSource,
 } from "../lib";
 import { CountUp, Ring } from "../motion";
 import { reducedMotion } from "../theme";
@@ -947,11 +948,14 @@ export function Overview({
             <div className="source-note">
               <CircleHelp size={15} />
               <span>
-                Погода: {translate(d.weather.source)}
-                {d.weather.stale ? " (устарела)" : ""}, базовый ветер{" "}
+                Погода: {weatherSource(d.weather)} · ветер{" "}
                 {fmt(d.weather.wind_mps, 1)} м/с
+                {d.weather.precipitation_mm > 0 &&
+                  `, осадки ${fmt(d.weather.precipitation_mm, 1)} мм`}
                 {d.weather.wave_height_m != null &&
-                  `, волнение ${fmt(d.weather.wave_height_m, 1)} м`}
+                  (d.weather.wave_estimated
+                    ? `, волнение ≈${fmt(d.weather.wave_height_m, 1)} м (оценка по ветру)`
+                    : `, волнение ${fmt(d.weather.wave_height_m, 1)} м`)}
                 {d.scenario.wind_mps != null &&
                   ` · ветер сценария: ${fmt(d.scenario.wind_mps, 1)} м/с`}
                 {d.scenario.wave_height_m != null &&

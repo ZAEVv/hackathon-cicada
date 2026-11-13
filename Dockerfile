@@ -19,7 +19,8 @@ ENV PYTHONUNBUFFERED=1 \
     OPENBLAS_NUM_THREADS=1 \
     MKL_NUM_THREADS=1 \
     NUMEXPR_NUM_THREADS=1 \
-    DATABASE_PATH=/data/smart_caspian_demo.sqlite3
+    DATABASE_PATH=/data/smart_caspian_demo.sqlite3 \
+    WEATHER_PROVIDER=open-meteo
 # Node is needed only to run `vite preview`.
 COPY --from=web /usr/local/bin/node /usr/local/bin/node
 WORKDIR /app

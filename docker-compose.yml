@@ -43,6 +43,8 @@ services:
       ENABLE_API_DOCS: ${ENABLE_API_DOCS:-}
       AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:-}
       LEDGER_WITNESS_KEYS: ${LEDGER_WITNESS_KEYS:-}
+      # open-meteo (live, default) or synthetic (offline); failures fall back to synthetic.
+      WEATHER_PROVIDER: ${WEATHER_PROVIDER:-open-meteo}
       # Witness ledger: three separate node services on the internal "ledger" network.
       LEDGER_WITNESS_URLS: ${LEDGER_WITNESS_URLS:-witness-1=http://witness-1:8100,witness-2=http://witness-2:8100,witness-3=http://witness-3:8100}
       # Corridor graph (Neo4j). An empty GRAPH_DB_URL selects the in-memory networkx fallback.

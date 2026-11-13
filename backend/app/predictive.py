@@ -17,7 +17,7 @@ from .data import MAX_WAVE_HEIGHT_M, estimate_wave_height_m
 
 
 _NOW = "2026-11-12T08:00:00Z"
-_VERSION = "gbm-demo-v3"
+_VERSION = "gbm-v4"
 _FEATURES = (
     "queue_hours", "wind_mps", "precipitation_mm", "observed_delay_hours",
     "mass_tonnes", "wave_height_m",
@@ -176,7 +176,7 @@ def predict(model: object, shipment: dict, weather: dict,
     """Forecast additional delay, then add known delays exactly once.
 
     ``cutoff`` is the planned departure's cutoff (see ``routing.planned_cutoff``);
-    without it the arrival day's 14:00Z demo cutoff is assumed. The miss
+    without it the arrival day's 14:00Z cutoff is assumed. The miss
     probability is the chance that readiness, including documents, falls after
     that cutoff given the spread of past forecast errors. It is a synthetic
     estimate, not a guaranteed calibrated probability. Factors describe input
@@ -247,7 +247,7 @@ def predict(model: object, shipment: dict, weather: dict,
         factors.append("Documents determine readiness")
     if documents > deadline:
         factors.append("Documents ready after cutoff")
-    factors.append("Readiness after demo cutoff" if ready > deadline else "Readiness within demo cutoff")
+    factors.append("Readiness after cutoff" if ready > deadline else "Readiness within cutoff")
     factors.append("Miss probability from synthetic forecast-error spread; not guaranteed calibrated")
     return {
         "delay_hours": delay,

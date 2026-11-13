@@ -96,6 +96,10 @@ class Weather(Contract):
     source: Literal["synthetic", "cache", "open-meteo"] = "synthetic"
     observed_at: str = SIMULATION_NOW
     stale: bool = False
+    # True when live weather was requested but unavailable (synthetic stand-in).
+    fallback: bool = False
+    # True when a sea port's wave height is the wind-based estimate, not marine data.
+    wave_estimated: bool = False
 
 
 class Shipment(Contract):

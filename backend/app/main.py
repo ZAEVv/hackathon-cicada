@@ -15,7 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from . import data, graphdb, hubs, ledger, preclearance, predictive, routing, security, summary
+from . import data, graphdb, hubs, ledger, preclearance, predictive, routing, security, summary, weather
 from .schemas import (
     SIMULATION_NOW, CorridorSummary, AuditEntry, AuditVerification, ChooseRouteRequest,
     Dashboard, Declaration, Ruleset, DeclarationInput, IdempotencyKey, ModelMetrics,
@@ -119,6 +119,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
         app.state.model, app.state.metrics = predictive.train_model(app.state.catalog["history"])
         app.state.shipments = {s["id"]: s for s in app.state.catalog["shipments"]}
         app.state.scenarios = {}
+        # WEATHER_PROVIDER=open-meteo|synthetic; live data is cached in memory (TTL)
+        # and every failure falls back to synthetic weather, marked as such.
+        app.state.weather = weather.WeatherService(app.state.catalog["ports"])
+        app.state.weather.warm()
         app.state.selected = {}
         preclearance.init_db(app.state.db)
         ledger.init_witnesses(app.state.db)  # simulated in-process witness nodes
@@ -200,11 +204,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
             delayed = datetime.fromisoformat(SIMULATION_NOW.replace("Z", "+00:00")) + timedelta(hours=12)
             item["documents_ready_at"] = max(original, delayed).isoformat().replace("+00:00", "Z")
         profile = routing.scenario_profile(app.state.scenarios.get(shipment_id, "none"))
-        weather = data.get_weather(item["current_location_id"])
+        conditions = app.state.weather.get(item["current_location_id"])
         # The cutoff comes from the original plan (not the document-delayed copy),
         # i.e. the same departure the route baseline below is measured against.
         cutoff = routing.planned_cutoff(shipment(shipment_id), app.state.catalog["services"], SIMULATION_NOW)
-        forecast = predictive.predict(app.state.model, item, weather, profile, SIMULATION_NOW, cutoff=cutoff)
+        forecast = predictive.predict(app.state.model, item, conditions, profile, SIMULATION_NOW, cutoff=cutoff)
         # Keep the original document-readiness plan for the route baseline. The
         # forecast already carries any document-induced delay; changing both would
         # silently move the planned sailing and hide a missed connection.
@@ -246,7 +250,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 continue
             event["source"] = "synthetic-model"
             event["quality_flag"] = "forecast"
-        return ShipmentDetail(shipment=item, weather=weather, scenario=profile, prediction=forecast,
+        return ShipmentDetail(shipment=item, weather=conditions, scenario=profile, prediction=forecast,
                               selected_route_id=selected_id, preclearance=declaration, **routes)
 
     @app.get("/api/health")

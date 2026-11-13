@@ -788,3 +788,22 @@ def test_wave_estimate_is_monotonic_and_bounded() -> None:
     assert 0.2 <= estimate_wave_height_m(0) and max(values) <= 8.0
     assert 0.3 <= estimate_wave_height_m(4) <= 0.8
     assert 3.0 <= estimate_wave_height_m(22) <= 5.0
+
+
+def test_history_has_unobserved_incidents_and_noisy_labels(demo: dict) -> None:
+    history = demo["history"]
+    calm = [r for r in history if r["wind_mps"] < 9 and r["queue_hours"] <= 2]
+    # Crane breakdowns / inspections: some calm rows are late for reasons the
+    # features cannot explain.
+    assert sum(r["delay_hours"] > 3 for r in calm) >= 5
+    # Labels are not a deterministic function of the visible slack: identical-looking
+    # budgets go both ways because the real cutoff slips.
+    margin = [r["hours_to_cutoff"] - r["observed_delay_hours"] - r["queue_hours"] - r["delay_hours"]
+              for r in history]
+    hit_with_room = sum(m > 0 and r["missed_connection"] for m, r in zip(margin, history))
+    made_without_room = sum(m < 0 and not r["missed_connection"] for m, r in zip(margin, history))
+    assert hit_with_room >= 5 and made_without_room >= 5
+    # Heteroscedastic: spread of delay grows with wind.
+    low = [r["delay_hours"] for r in history if r["wind_mps"] < 6]
+    high = [r["delay_hours"] for r in history if r["wind_mps"] >= 18]
+    assert statistics.pstdev(high) > 1.5 * statistics.pstdev(low)
