@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from backend.app import hubs, preclearance
 from backend.app.main import create_app
 
-BROKER = {"Authorization": "Bearer demo-broker-token"}
+BROKER = {"Authorization": "Bearer dev-broker-token"}
 SHIPMENTS = [f"SCT-00{i}" for i in range(1, 7)]
 KINDS = ("none", "storm", "congestion", "closure")
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
-    for name in ("DEMO_BROKER_TOKEN", "DEMO_REVIEWER_TOKEN", "DEMO_DISABLE_DEFAULT_TOKENS",
+    for name in ("BROKER_TOKEN", "REVIEWER_TOKEN", "DISABLE_DEFAULT_TOKENS",
                  "AUDIT_HMAC_KEY"):
         monkeypatch.delenv(name, raising=False)
 

@@ -1309,18 +1309,6 @@ button:disabled {
   font-size: 12px;
   line-height: 1.35;
 }
-.demo-note {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: auto;
-  padding-top: 6px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.demo-note .pulse {
-  color: var(--green);
-}
 
 /* Centre toolbar */
 .tools {

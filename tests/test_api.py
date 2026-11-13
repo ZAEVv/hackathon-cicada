@@ -10,12 +10,12 @@ from backend.app import preclearance, routing
 from backend.app.main import create_app
 
 
-BROKER = {"Authorization": "Bearer demo-broker-token"}
-REVIEWER = {"Authorization": "Bearer demo-reviewer-token"}
+BROKER = {"Authorization": "Bearer dev-broker-token"}
+REVIEWER = {"Authorization": "Bearer dev-reviewer-token"}
 SHIPMENT = "/api/shipments/SCT-001"
 READ_ENDPOINTS = ["/api/dashboard", SHIPMENT, f"{SHIPMENT}/preclearance", f"{SHIPMENT}/audit",
                   f"{SHIPMENT}/audit/verify", "/api/catalog", "/api/model/metrics"]
-ENV_VARS = ("DEMO_BROKER_TOKEN", "DEMO_REVIEWER_TOKEN", "DEMO_DISABLE_DEFAULT_TOKENS", "ENABLE_API_DOCS")
+ENV_VARS = ("BROKER_TOKEN", "REVIEWER_TOKEN", "DISABLE_DEFAULT_TOKENS", "ENABLE_API_DOCS")
 
 
 @pytest.fixture(autouse=True)
@@ -33,9 +33,9 @@ def client(tmp_path):
 
 
 def declaration(mass=20000):
-    container = "DEMO0000001"
+    container = "CSPU0000013"
     return {
-        "shipper": "Demo Russian Exporter", "consignee": "Demo Iranian Importer",
+        "shipper": "ООО «Волга Экспорт»", "consignee": "Caspian Trade Co.",
         "description": "General machine parts", "mass_kg": mass,
         "value_usd": 45000, "origin_country": "RU", "hs_code": "847990",
         "container_id": container,
@@ -50,7 +50,7 @@ def declaration(mass=20000):
 def assert_unauthorized(response):
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
-    assert response.json() == {"detail": "Valid demo bearer token required"}
+    assert response.json() == {"detail": "Valid bearer token required"}
 
 
 def test_dashboard_and_unknown_shipment_contract(client):
@@ -113,7 +113,7 @@ def test_preclearance_lifecycle_replay_audit_and_readiness_forecast(client):
     missing = client.post(f"{SHIPMENT}/preclearance/validate", headers=BROKER)
     assert missing.status_code == 404
     assert missing.json() == {"detail": "Not found"}
-    assert client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "demo_accepted"}, headers=BROKER).status_code == 403
+    assert client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "accepted"}, headers=BROKER).status_code == 403
     bad = declaration()
     bad["documents"][1]["mass_kg"] = 19000
     saved = client.put(f"{SHIPMENT}/preclearance", json=bad, headers=BROKER)
@@ -139,7 +139,7 @@ def test_preclearance_lifecycle_replay_audit_and_readiness_forecast(client):
     headers = {**BROKER, "Idempotency-Key": key}
     submitted = client.post(f"{SHIPMENT}/preclearance/submit", headers=headers)
     assert submitted.status_code == 200 and submitted.json()["status"] == "submitted"
-    assert client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "demo_accepted", "comment": "Checked"}, headers=REVIEWER).json()["status"] == "demo_accepted"
+    assert client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "accepted", "comment": "Checked"}, headers=REVIEWER).json()["status"] == "accepted"
     replay = client.post(f"{SHIPMENT}/preclearance/submit", headers=headers)
     assert replay.status_code == 200 and replay.json() == submitted.json()
     audit = client.get(f"{SHIPMENT}/audit", headers=REVIEWER).json()
@@ -160,11 +160,11 @@ def test_trusted_declaration_is_auto_accepted_and_replays(client):
     first = client.post(f"{SHIPMENT}/preclearance/submit", headers=headers)
     assert first.status_code == 200 and first.json()["status"] == "auto_accepted"
     clearance = first.json()["clearance"]
-    assert clearance["decision"] == "auto_accepted" and clearance["ruleset_id"] == "demo-rules-v1"
+    assert clearance["decision"] == "auto_accepted" and clearance["ruleset_id"] == "rules-v1"
     assert all(r["passed"] for r in clearance["results"])
     assert clearance["ruleset_hash"] == client.get("/api/preclearance/ruleset", headers=REVIEWER).json()["ruleset_hash"]
     assert client.post(f"{SHIPMENT}/preclearance/submit", headers=headers).json() == first.json()
-    review = client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "demo_accepted"}, headers=REVIEWER)
+    review = client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "accepted"}, headers=REVIEWER)
     assert review.status_code == 409
     assert client.get(f"{SHIPMENT}/audit/verify", headers=REVIEWER).json()["valid"]
     last = client.get(f"{SHIPMENT}/audit", headers=REVIEWER).json()[-1]
@@ -177,14 +177,14 @@ def test_failed_rule_goes_to_manual_review_then_reviewer_decides(client, changes
     submitted = client.post(f"{SHIPMENT}/preclearance/submit", headers={**BROKER, "Idempotency-Key": "m-1"}).json()
     assert submitted["status"] == "submitted" and submitted["clearance"]["decision"] == "manual_review"
     assert [r["rule_id"] for r in submitted["clearance"]["results"] if not r["passed"]] == [rule]
-    reviewed = client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "demo_accepted"}, headers=REVIEWER)
-    assert reviewed.status_code == 200 and reviewed.json()["status"] == "demo_accepted"
+    reviewed = client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "accepted"}, headers=REVIEWER)
+    assert reviewed.status_code == 200 and reviewed.json()["status"] == "accepted"
 
 
 def test_ruleset_endpoint_requires_auth_and_lists_rules(client):
     assert_unauthorized(client.get("/api/preclearance/ruleset"))
     body = client.get("/api/preclearance/ruleset", headers=BROKER).json()
-    assert body["id"] == "demo-rules-v1" and len(body["ruleset_hash"]) == 64
+    assert body["id"] == "rules-v1" and len(body["ruleset_hash"]) == 64
     assert [r["id"] for r in body["rules"]] == ["R1", "R2", "R3", "R4", "R5"]
 
 
@@ -242,19 +242,19 @@ def test_broker_mutations_reject_reviewer(client, method, path, body):
 
 
 def test_review_rejects_broker_with_403(client):
-    response = client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "demo_accepted"}, headers=BROKER)
+    response = client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "accepted"}, headers=BROKER)
     assert response.status_code == 403
 
 
 @pytest.mark.parametrize("scheme", ["bearer", "BEARER", "BeArEr"])
 def test_bearer_scheme_is_case_insensitive(client, scheme):
-    assert client.get(SHIPMENT, headers={"Authorization": f"{scheme} demo-broker-token"}).status_code == 200
+    assert client.get(SHIPMENT, headers={"Authorization": f"{scheme} dev-broker-token"}).status_code == 200
 
 
 @pytest.mark.parametrize("value", [
-    "Bearer", "Bearer ", "demo-broker-token", "Bearerdemo-broker-token",
-    "Bearer demo-broker-token extra", "Token demo-broker-token",
-    "Bearer " + "demo-broker-token" + " " * 600,
+    "Bearer", "Bearer ", "dev-broker-token", "Bearerdev-broker-token",
+    "Bearer dev-broker-token extra", "Token dev-broker-token",
+    "Bearer " + "dev-broker-token" + " " * 600,
     "Bearer " + "a" * 600,
 ])
 def test_malformed_or_oversized_authorization_is_401(client, value):
@@ -273,16 +273,16 @@ def test_non_ascii_token_is_401_not_500_and_never_echoed(client):
 
 @pytest.mark.parametrize("value", ["1", "true", "YES", " yes "])
 def test_default_tokens_rejected_when_disabled(client, monkeypatch, value):
-    monkeypatch.setenv("DEMO_DISABLE_DEFAULT_TOKENS", value)
+    monkeypatch.setenv("DISABLE_DEFAULT_TOKENS", value)
     assert_unauthorized(client.get(SHIPMENT, headers=BROKER))
     assert_unauthorized(client.get(SHIPMENT, headers=REVIEWER))
-    monkeypatch.setenv("DEMO_BROKER_TOKEN", "configured-broker")
+    monkeypatch.setenv("BROKER_TOKEN", "configured-broker")
     assert client.get(SHIPMENT, headers={"Authorization": "Bearer configured-broker"}).status_code == 200
 
 
 @pytest.mark.parametrize("value", ["0", "false", "no", ""])
 def test_default_tokens_kept_when_disable_flag_is_falsy(client, monkeypatch, value):
-    monkeypatch.setenv("DEMO_DISABLE_DEFAULT_TOKENS", value)
+    monkeypatch.setenv("DISABLE_DEFAULT_TOKENS", value)
     assert client.get(SHIPMENT, headers=BROKER).status_code == 200
 
 
@@ -292,13 +292,13 @@ def test_default_tokens_kept_when_disable_flag_is_falsy(client, monkeypatch, val
 def test_default_tokens_rejected_behind_forwarding_proxy(client, monkeypatch, header):
     assert_unauthorized(client.get(SHIPMENT, headers={**BROKER, **header}))
     assert_unauthorized(client.get(SHIPMENT, headers={**REVIEWER, **header}))
-    monkeypatch.setenv("DEMO_REVIEWER_TOKEN", "configured-reviewer")
+    monkeypatch.setenv("REVIEWER_TOKEN", "configured-reviewer")
     configured = {"Authorization": "Bearer configured-reviewer", **header}
     assert client.get(SHIPMENT, headers=configured).status_code == 200
 
 
 def test_default_tokens_rejected_from_non_loopback_peer(tmp_path, monkeypatch):
-    monkeypatch.setenv("DEMO_BROKER_TOKEN", "configured-broker")
+    monkeypatch.setenv("BROKER_TOKEN", "configured-broker")
     app = create_app(str(tmp_path / "remote.sqlite3"))
     with TestClient(app, client=("203.0.113.5", 40000)) as remote:
         assert_unauthorized(remote.get(SHIPMENT, headers=REVIEWER))
@@ -310,7 +310,7 @@ def test_default_tokens_rejected_from_non_loopback_peer(tmp_path, monkeypatch):
 
 def test_env_token_overrides_default_per_role(client, monkeypatch):
     # Env is read per request, so setting it after create_app takes effect.
-    monkeypatch.setenv("DEMO_BROKER_TOKEN", "configured-broker")
+    monkeypatch.setenv("BROKER_TOKEN", "configured-broker")
     assert_unauthorized(client.get(SHIPMENT, headers=BROKER))
     configured = {"Authorization": "Bearer configured-broker"}
     assert client.get(SHIPMENT, headers=configured).status_code == 200
@@ -322,24 +322,24 @@ def test_env_token_overrides_default_per_role(client, monkeypatch):
 
 @pytest.mark.parametrize("blank", ["", "   ", "\t"])
 def test_blank_env_token_is_treated_as_unset(client, monkeypatch, blank):
-    monkeypatch.setenv("DEMO_BROKER_TOKEN", blank)
+    monkeypatch.setenv("BROKER_TOKEN", blank)
     assert_unauthorized(client.get(SHIPMENT, headers={"Authorization": "Bearer "}))
     assert client.post(f"{SHIPMENT}/scenario", json={"kind": "storm"}, headers=BROKER).status_code == 200
 
 
 def test_identical_tokens_fail_closed(client, monkeypatch, caplog):
-    monkeypatch.setenv("DEMO_BROKER_TOKEN", "same-token")
-    monkeypatch.setenv("DEMO_REVIEWER_TOKEN", "same-token")
+    monkeypatch.setenv("BROKER_TOKEN", "same-token")
+    monkeypatch.setenv("REVIEWER_TOKEN", "same-token")
     same = {"Authorization": "Bearer same-token"}
     with caplog.at_level(logging.WARNING, logger="sct"):
         assert_unauthorized(client.get(SHIPMENT, headers=same))
         assert_unauthorized(client.post(f"{SHIPMENT}/scenario", json={"kind": "storm"}, headers=same))
-        assert_unauthorized(client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "demo_accepted"}, headers=same))
+        assert_unauthorized(client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "accepted"}, headers=same))
     assert "identical" in caplog.text and "same-token" not in caplog.text
 
 
 def test_env_token_equal_to_other_roles_default_fails_closed(client, monkeypatch):
-    monkeypatch.setenv("DEMO_BROKER_TOKEN", "demo-reviewer-token")
+    monkeypatch.setenv("BROKER_TOKEN", "dev-reviewer-token")
     assert_unauthorized(client.get(SHIPMENT, headers=REVIEWER))
     assert_unauthorized(client.get(SHIPMENT, headers=BROKER))
 
@@ -380,7 +380,7 @@ def test_internal_routing_errors_are_generic_500(lenient_client, monkeypatch, ca
             assert "secret-detail" not in response.text
     records = [r for r in caplog.records if r.name == "sct"]
     assert records and all(r.levelno == logging.ERROR for r in records)
-    assert "demo-broker-token" not in caplog.text
+    assert "dev-broker-token" not in caplog.text
 
 
 def test_unexpected_preclearance_errors_are_500(lenient_client, monkeypatch):
@@ -402,7 +402,7 @@ def test_unexpected_preclearance_errors_are_500(lenient_client, monkeypatch):
 def test_documented_preclearance_errors_keep_their_status(client):
     assert client.post(f"{SHIPMENT}/preclearance/submit", headers={**BROKER, "Idempotency-Key": "k"}).json() == {"detail": "Not found"}
     assert client.put(f"{SHIPMENT}/preclearance", json=declaration(), headers=BROKER).status_code == 200
-    not_ready = client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "demo_accepted"}, headers=REVIEWER)
+    not_ready = client.post(f"{SHIPMENT}/preclearance/review", json={"decision": "accepted"}, headers=REVIEWER)
     assert not_ready.status_code == 409
     assert not_ready.json() == {"detail": "Only submitted declarations can be reviewed"}
 

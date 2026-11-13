@@ -71,7 +71,7 @@ def make_app(clock=None, lifespan=None, **kwargs):
     @app.get("/api/private")
     def private(authorization: str | None = Header(default=None)):
         if authorization != "Bearer good":
-            raise HTTPException(401, "Valid demo bearer token required")
+            raise HTTPException(401, "Valid bearer token required")
         return {"ok": True}
 
     @app.get("/api/custom-headers")

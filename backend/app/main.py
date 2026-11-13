@@ -27,21 +27,26 @@ from .schemas import LedgerStatus
 logger = logging.getLogger("sct")
 
 TRUTHY = frozenset({"1", "true", "yes"})
-TOKEN_ENV = {"broker": "DEMO_BROKER_TOKEN", "reviewer": "DEMO_REVIEWER_TOKEN"}
-DEFAULT_TOKENS = {"broker": "demo-broker-token", "reviewer": "demo-reviewer-token"}
-USERS = {"broker": {"id": "demo-broker", "role": "broker"},
-         "reviewer": {"id": "demo-reviewer", "role": "reviewer"}}
+TOKEN_ENV = {"broker": "BROKER_TOKEN", "reviewer": "REVIEWER_TOKEN"}
+DEFAULT_TOKENS = {"broker": "dev-broker-token", "reviewer": "dev-reviewer-token"}
+USERS = {"broker": {"id": "dev-broker", "role": "broker"},
+         "reviewer": {"id": "dev-reviewer", "role": "reviewer"}}
 # Transport peers allowed to use the built-in demo tokens. "testclient" is the
 # peer name Starlette's TestClient reports.
 LOOPBACK_PEERS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
 FORWARDING_HEADERS = ("forwarded", "x-forwarded-for", "x-real-ip")
 MAX_AUTHORIZATION_LENGTH = 512
-AUTH_REQUIRED = "Valid demo bearer token required"
+AUTH_REQUIRED = "Valid bearer token required"
 DEPARTURE_EVENT_MODES = {"sea_departure": "sea", "rail_departure": "rail", "road_departure": "road"}
 
 
+def _env(name: str) -> str:
+    """Read NAME, falling back to the legacy DEMO_-prefixed variable."""
+    return (os.getenv(name) or os.getenv("DEMO_" + name) or "").strip()
+
+
 def _truthy(name: str) -> bool:
-    return (os.getenv(name) or "").strip().lower() in TRUTHY
+    return _env(name).lower() in TRUTHY
 
 
 def _digest(value: str) -> bytes:
@@ -54,13 +59,13 @@ def _configured_tokens() -> dict[str, tuple[str, bool]]:
     """{role: (token, is_builtin_default)}, read from the environment on every call."""
     tokens = {}
     for role, env in TOKEN_ENV.items():
-        value = (os.getenv(env) or "").strip()
+        value = _env(env)
         tokens[role] = (value, False) if value else (DEFAULT_TOKENS[role], True)
     return tokens
 
 
 def _defaults_allowed(request: Request) -> bool:
-    if _truthy("DEMO_DISABLE_DEFAULT_TOKENS"):
+    if _truthy("DISABLE_DEFAULT_TOKENS"):
         return False
     if request.client is None or request.client.host not in LOOPBACK_PEERS:
         return False
@@ -127,7 +132,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 close()
 
     docs = _truthy("ENABLE_API_DOCS")
-    app = FastAPI(title="Smart Caspian Transit — synthetic demo", lifespan=lifespan,
+    app = FastAPI(title="Smart Caspian Transit API", lifespan=lifespan,
                   docs_url="/docs" if docs else None, redoc_url="/redoc" if docs else None,
                   openapi_url="/openapi.json" if docs else None)
     origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -190,7 +195,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def detail(shipment_id):
         item = shipment(shipment_id)
         declaration = preclearance.get_declaration(app.state.db, shipment_id)
-        if declaration and declaration["status"] not in {"ready", "submitted", "auto_accepted", "demo_accepted"}:
+        if declaration and declaration["status"] not in {"ready", "submitted", "auto_accepted", "accepted"}:
             original = datetime.fromisoformat(item["documents_ready_at"].replace("Z", "+00:00"))
             delayed = datetime.fromisoformat(SIMULATION_NOW.replace("Z", "+00:00")) + timedelta(hours=12)
             item["documents_ready_at"] = max(original, delayed).isoformat().replace("+00:00", "Z")

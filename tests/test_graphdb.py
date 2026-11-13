@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from backend.app import data, graphdb, routing
 from backend.app.main import create_app
 
-BROKER = {"Authorization": "Bearer demo-broker-token"}
+BROKER = {"Authorization": "Bearer dev-broker-token"}
 SCENARIOS = ("none", "storm", "congestion", "closure")
 GRAPH_ENV = ("GRAPH_DB_URL", "GRAPH_DB_USER", "GRAPH_DB_PASSWORD", "GRAPH_DB_DATABASE")
 TEST_URL = os.getenv("GRAPH_DB_TEST_URL", "").strip()
@@ -27,7 +27,8 @@ needs_neo4j = pytest.mark.skipif(not TEST_URL, reason="GRAPH_DB_TEST_URL not set
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
-    for name in GRAPH_ENV + ("DEMO_BROKER_TOKEN", "DEMO_REVIEWER_TOKEN", "DEMO_DISABLE_DEFAULT_TOKENS"):
+    for name in GRAPH_ENV + ("BROKER_TOKEN", "REVIEWER_TOKEN", "DISABLE_DEFAULT_TOKENS",
+                                "DEMO_BROKER_TOKEN", "DEMO_REVIEWER_TOKEN", "DEMO_DISABLE_DEFAULT_TOKENS"):
         monkeypatch.delenv(name, raising=False)
 
 

@@ -98,11 +98,11 @@ R_STORM = "Storm limits berth operations"
 R_CONGESTION = "Scenario congestion at terminal"
 R_CLOSURE = "Sea service closed: cargo accumulates"
 R_DIVERTED = "Diverted flow from closed service"
-R_SHIPMENTS = "Demo shipments handled in this window"
+R_SHIPMENTS = "Shipments handled in this window"
 R_HELD = "Shipment held: route unavailable"
 R_BACKLOG = "Backlog carried over"
 
-DISCLAIMER = ("Synthetic forecast: seeded background load and demo capacities; "
+DISCLAIMER = ("Synthetic forecast: seeded background load and modelled capacities; "
               "not real port statistics.")
 
 

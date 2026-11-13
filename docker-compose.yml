@@ -7,6 +7,10 @@ services:
       - "127.0.0.1:5173:5173"
     environment:
       # Pass through from the shell or a .env file next to this compose file (all optional).
+      BROKER_TOKEN: ${BROKER_TOKEN:-}
+      REVIEWER_TOKEN: ${REVIEWER_TOKEN:-}
+      DISABLE_DEFAULT_TOKENS: ${DISABLE_DEFAULT_TOKENS:-}
+      # Legacy names, still accepted as fallbacks.
       DEMO_BROKER_TOKEN: ${DEMO_BROKER_TOKEN:-}
       DEMO_REVIEWER_TOKEN: ${DEMO_REVIEWER_TOKEN:-}
       DEMO_DISABLE_DEFAULT_TOKENS: ${DEMO_DISABLE_DEFAULT_TOKENS:-}

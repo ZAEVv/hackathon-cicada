@@ -1,7 +1,7 @@
 # Smart Caspian Transit: one container, two processes.
 # The API listens on the container's loopback only; the only published port is the UI
 # (vite preview), which proxies /api to 127.0.0.1:8000. This keeps the API's security model
-# intact: demo tokens are accepted only from loopback clients, and here the proxy is one.
+# intact: default dev tokens are accepted only from loopback clients, and here the proxy is one.
 
 # --- stage 1: frontend dependencies + production bundle ------------------------------
 FROM node:22-bookworm-slim AS web
