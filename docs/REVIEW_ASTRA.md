@@ -26,7 +26,7 @@ Reviewed independently: `SOURCE_CASE_2.md`, `CONTRACTS.md`, `QA.md`, README, all
 1. Display a submitted declaration with shipper `Saved exporter`.
 2. Change the editable shipper field to `UNSAVED DIFFERENT EXPORTER`.
 3. The “Принять в демо” button remains enabled; click it.
-4. Browser sends only `{decision: "demo_accepted", comment: ""}`. The submitted stored payload is accepted, and the visible shipper silently changes back to `Saved exporter`.
+4. Browser sends only `{decision: "accepted", comment: ""}`. The submitted stored payload is accepted, and the visible shipper silently changes back to `Saved exporter`.
 
 Observed output: `DIRTY_REVIEW_BUTTON_ENABLED true`; `FIELD_AFTER_ACCEPT Saved exporter`.
 
@@ -84,7 +84,7 @@ Observed: PUT **200**, response `payload.value_usd: null`; validate **200 ready*
 
 **Location:** `backend/app/preclearance.py:207–210`; comparison includes content hash but omits version/status already present in each audit payload (`62–67`).
 
-**Reproduction, isolated SQLite only:** save/validate a declaration, then update only its stored `declaration_json.status` to `demo_accepted` and `version` to `99`, retaining its payload, hash and audit entries. GET audit verification returns `valid: true`.
+**Reproduction, isolated SQLite only:** save/validate a declaration, then update only its stored `declaration_json.status` to `accepted` and `version` to `99`, retaining its payload, hash and audit entries. GET audit verification returns `valid: true`.
 
 **Impact:** an ordinary alteration of current approval/version state is invisible to the green integrity indicator even though the latest intact audit entry contains enough information to detect it. This does not require inventing signatures, an external ledger, or protection against a complete coherent database rewrite.
 

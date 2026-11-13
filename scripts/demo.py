@@ -5,7 +5,7 @@ Covers: six shipments (western line + eastern branch), storm -> Makhachkala
 bottleneck in the 72 h hub forecast, closure -> Amirabad alternative, route
 choice reflected everywhere, scenario reset, pre-clearance automatic path
 (trusted shipper -> auto_accepted) and manual path (untrusted shipper ->
-reviewer needs_revision -> new draft -> demo_accepted), idempotent replay,
+reviewer needs_revision -> new draft -> accepted), idempotent replay,
 audit chain verification, corridor summary and model metrics.
 
 Assertions are relations ("storm peak > base peak", "an alternative via
@@ -27,7 +27,7 @@ from urllib.request import Request, urlopen
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 SHIPMENTS = [f"SCT-00{i}" for i in range(1, 7)]
 WEST, EAST = "SCT-001", "SCT-004"
-TRUSTED_SHIPPER = "Demo Russian Exporter"
+TRUSTED_SHIPPER = "ООО «Волга Экспорт»"
 UNTRUSTED_SHIPPER = "Demo Unlisted Trading Co"
 
 
@@ -43,8 +43,8 @@ class Walkthrough:
         self.run_id = uuid.uuid4().hex[:10]
         # Mirror the server: a blank env value means "unset". The built-in
         # defaults are only accepted by the API from a direct loopback peer.
-        broker = (os.getenv("DEMO_BROKER_TOKEN") or "").strip() or "demo-broker-token"
-        reviewer = (os.getenv("DEMO_REVIEWER_TOKEN") or "").strip() or "demo-reviewer-token"
+        broker = (os.getenv("BROKER_TOKEN") or os.getenv("DEMO_BROKER_TOKEN") or "").strip() or "dev-broker-token"
+        reviewer = (os.getenv("REVIEWER_TOKEN") or os.getenv("DEMO_REVIEWER_TOKEN") or "").strip() or "dev-reviewer-token"
         self.broker = {"Authorization": f"Bearer {broker}"}
         self.reviewer = {"Authorization": f"Bearer {reviewer}"}
         self.passed = 0
@@ -133,7 +133,7 @@ class Walkthrough:
         mass, container = item["mass_kg"], item["container_id"]
         tag = f"{self.run_id}-{sid[-3:]}"
         return {
-            "shipper": shipper, "consignee": "Demo Iranian Importer",
+            "shipper": shipper, "consignee": "Caspian Trade Co.",
             "description": "General machine parts", "mass_kg": mass, "value_usd": 45000,
             "origin_country": "RU", "hs_code": "847990", "container_id": container,
             "documents": [
@@ -294,7 +294,7 @@ class Walkthrough:
         base_ready = self.facts["baseline"][sid]["shipment"]["documents_ready_at"]
         self.unblock(sid)
         ruleset = self.call("/api/preclearance/ruleset")
-        self.check(ruleset["id"] == "demo-rules-v1" and len(ruleset["rules"]) >= 1,
+        self.check(ruleset["id"] == "rules-v1" and len(ruleset["rules"]) >= 1,
                    f"ruleset {ruleset['id']} with {len(ruleset['rules'])} rules")
         failed = self.save_and_validate(sid, self.payload(sid, TRUSTED_SHIPPER, -1000), "validation_failed")
         self.check(any(i["code"] == "mass_mismatch" for i in failed["validation"]["issues"]),
@@ -323,7 +323,7 @@ class Walkthrough:
                    "auto_accepted does not delay the cargo")
         self.check(after["preclearance"]["status"] == "auto_accepted", "shipment detail shows auto_accepted")
         try:
-            self.call(f"{path}/preclearance/review", "POST", {"decision": "demo_accepted", "comment": "n/a"},
+            self.call(f"{path}/preclearance/review", "POST", {"decision": "accepted", "comment": "n/a"},
                       self.reviewer, expect=409)
             self.check(True, "auto_accepted declaration is not open for manual review (409)")
         except ApiError as error:
@@ -342,7 +342,7 @@ class Walkthrough:
                    f"untrusted shipper -> submitted for manual review (failed: {', '.join(failed_rules)})")
         self.verify(sid, "after manual submit")
         try:
-            self.call(f"{path}/preclearance/review", "POST", {"decision": "demo_accepted", "comment": "self"},
+            self.call(f"{path}/preclearance/review", "POST", {"decision": "accepted", "comment": "self"},
                       expect=403)
             self.check(True, "broker cannot decide its own declaration (403)")
         except ApiError as error:
@@ -354,16 +354,16 @@ class Walkthrough:
         replay = self.call(f"{path}/preclearance/submit", "POST", headers=key)
         self.check(replay == submitted, "replay after review returns the original submit answer")
         payload = self.payload(sid, UNTRUSTED_SHIPPER)
-        payload["consignee"] = "Demo Iranian Importer (confirmed)"
+        payload["consignee"] = "Caspian Trade Co. (confirmed)"
         validated = self.save_and_validate(sid, payload, "ready")
         self.check(validated["version"] > submitted["version"], "revision saved as a new version")
         key2 = {**self.broker, "Idempotency-Key": f"demo-manual2-{self.run_id}"}
         resubmitted = self.call(f"{path}/preclearance/submit", "POST", headers=key2)
         self.check(resubmitted["status"] == "submitted", "revised declaration resubmitted")
         accepted = self.call(f"{path}/preclearance/review", "POST", {
-            "decision": "demo_accepted", "comment": f"Demo {self.run_id} reviewed"}, self.reviewer)
-        self.check(accepted["status"] == "demo_accepted", "reviewer -> demo_accepted")
-        self.verify(sid, "after demo_accepted")
+            "decision": "accepted", "comment": f"Demo {self.run_id} reviewed"}, self.reviewer)
+        self.check(accepted["status"] == "accepted", "reviewer -> accepted")
+        self.verify(sid, "after accepted")
         self.facts["manual"] = {"shipment": sid, "failed_rules": failed_rules, "final": accepted["status"]}
 
     def step_summary(self):
@@ -398,7 +398,7 @@ class Walkthrough:
         self.step("Storm -> Makhachkala bottleneck in the 72 h hub forecast", self.step_storm)
         self.step("Closure -> Amirabad alternative, choose route", self.step_closure)
         self.step("Reset and scenario matrix", self.step_reset)
-        self.step("Pre-clearance: automatic path (demo-rules-v1)", self.step_preclearance_auto)
+        self.step("Pre-clearance: automatic path (rules-v1)", self.step_preclearance_auto)
         self.step("Pre-clearance: manual path (reviewer role)", self.step_preclearance_manual)
         self.step("Corridor summary", self.step_summary)
         self.step("Model metrics", self.step_model)

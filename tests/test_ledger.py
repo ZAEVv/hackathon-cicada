@@ -14,8 +14,8 @@ from backend.app.main import create_app
 from backend.app.schemas import AuditVerification, LedgerStatus
 
 NOW = "2026-11-12T08:00:00Z"
-BROKER = {"id": "demo-broker", "role": "broker"}
-REVIEWER = {"id": "demo-reviewer", "role": "reviewer"}
+BROKER = {"id": "dev-broker", "role": "broker"}
+REVIEWER = {"id": "dev-reviewer", "role": "reviewer"}
 SHIPMENT = {"id": "SCT-001", "mass_kg": 20000, "container_id": "C1"}
 PAYLOAD = {"shipper": "Exporter", "consignee": "Importer", "description": "Parts",
            "mass_kg": 20000, "value_usd": 100, "origin_country": "RU", "hs_code": "123456",
@@ -27,8 +27,8 @@ NODE_IDS = [node for node, _ in ledger.NODES]
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for name in (pc.AUDIT_KEY_ENV, ledger.KEYS_ENV, "DEMO_BROKER_TOKEN", "DEMO_REVIEWER_TOKEN",
-                 "DEMO_DISABLE_DEFAULT_TOKENS"):
+    for name in (pc.AUDIT_KEY_ENV, ledger.KEYS_ENV, "BROKER_TOKEN", "REVIEWER_TOKEN",
+                 "DISABLE_DEFAULT_TOKENS"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -212,7 +212,7 @@ def client(tmp_path):
 
 
 def test_ledger_endpoint(client):
-    headers = {"Authorization": "Bearer demo-broker-token"}
+    headers = {"Authorization": "Bearer dev-broker-token"}
     empty = client.get("/api/shipments/SCT-001/ledger", headers=headers)
     assert empty.status_code == 200
     body = empty.json()
@@ -225,5 +225,5 @@ def test_ledger_endpoint(client):
 def test_ledger_endpoint_requires_auth_and_known_shipment(client):
     assert client.get("/api/shipments/SCT-001/ledger").status_code == 401
     response = client.get("/api/shipments/no-such-shipment/ledger",
-                          headers={"Authorization": "Bearer demo-reviewer-token"})
+                          headers={"Authorization": "Bearer dev-reviewer-token"})
     assert response.status_code == 404 and response.json() == {"detail": "Shipment not found"}

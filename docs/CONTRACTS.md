@@ -141,7 +141,7 @@ Route choice is local simulated selection, never booking or capacity reservation
 Main displays selected alternative as current_route after selection while retaining original
 comparison in alternatives where useful; main must recompute and verify ID on every selection.
 
-ESG factors kg CO2e/(tonne km): rail .022, road .105, sea .016; factor_version demo-v1.
+ESG factors kg CO2e/(tonne km): rail .022, road .105, sea .016; factor_version v1.
 Each leg = mass_kg/1000 * distance_km * factor. All factors illustrative, transport-only;
 exclude terminals/storage/empty repositioning, no certified WTW or GLEC/ISO compliance claim.
 
@@ -162,8 +162,8 @@ def get_audit(db_path: str, shipment_id: str) -> list[dict]: ... # AuditEntry[]
 def verify_audit(db_path: str, shipment_id: str) -> dict: ... # AuditVerification
 ```
 
-Actor is trusted server-created `{"id":"demo-broker","role":"broker"}` or
-`{"id":"demo-reviewer","role":"reviewer"}`; never accept actor from request JSON.
+Actor is trusted server-created `{"id":"dev-broker","role":"broker"}` or
+`{"id":"dev-reviewer","role":"reviewer"}`; never accept actor from request JSON.
 Broker saves/validates/submits; reviewer only reviews. Both see all three synthetic shipments;
 no claim of production tenant isolation. Functions enforce roles as defense in depth.
 One stable declaration ID per shipment, save increments version. Save draft even when
@@ -174,12 +174,12 @@ all three distinct document kinds with nonblank numbers, matching container IDs 
 mass tolerance <=1 kg across shipment/declaration/all docs. Issue codes:
 required, invalid_format, missing_document, duplicate_document, mass_mismatch, container_mismatch.
 Validation persists ready or validation_failed and issues; submit allowed only ready.
-Reviewer allowed submitted -> demo_accepted or needs_revision only. No automatic real approval.
+Reviewer allowed submitted -> accepted or needs_revision only. No automatic real approval.
 
-Ruleset (`demo-rules-v1`): on submit, `evaluate_ruleset(payload, shipment)` runs R1 documents
+Ruleset (`rules-v1`): on submit, `evaluate_ruleset(payload, shipment)` runs R1 documents
 consistent (validation passes, mass tolerance 1 kg), R2 HS code not starting with a manual-control
 prefix (93, 2844, 3601-3604), R3 value_usd/mass_kg within 0.05-500, R4 shipper in the trusted list
-(Demo Russian/Kazakh/Iranian Exporter), R5 origin in RU/KZ/IR/AZ/TM/UZ. Result `Clearance`
+(ООО «Волга Экспорт» / ТОО «Степь Экспорт» / Persian Caspian Export), R5 origin in RU/KZ/IR/AZ/TM/UZ. Result `Clearance`
 {ruleset_id, ruleset_hash (SHA256 of canonical rule definition), decision auto_accepted|manual_review,
 results[{rule_id, passed, detail}]} is stored on the declaration and in the `submit` audit payload.
 All pass => status `auto_accepted` (demo decision, not customs release); otherwise `submitted`
@@ -215,10 +215,10 @@ FastAPI `app`, CORS localhost:5173, Vite proxies /api to localhost:8000.
 All responses application/json, unwrapped schema objects unless table says otherwise.
 Every /api route except GET /api/health requires a bearer token (reads accept either role);
 missing/invalid token => 401 with `WWW-Authenticate: Bearer`, wrong role => 403.
-Environment `DEMO_BROKER_TOKEN` default `demo-broker-token`, `DEMO_REVIEWER_TOKEN`
-default `demo-reviewer-token`; bind localhost by default. The built-in defaults are honoured
+Environment `BROKER_TOKEN` default `dev-broker-token`, `REVIEWER_TOKEN`
+default `dev-reviewer-token`; bind localhost by default. The built-in defaults are honoured
 only for loopback clients without forwarding headers (`Forwarded`, `X-Forwarded-For`,
-`X-Real-IP`) and never when `DEMO_DISABLE_DEFAULT_TOKENS=1`; identical tokens => 401 for both.
+`X-Real-IP`) and never when `DISABLE_DEFAULT_TOKENS=1`; identical tokens => 401 for both.
 Security layer (`backend/app/security.py`): 400 bad Host, 403 cross-site browser request,
 405 other methods, 413 body over `MAX_BODY_BYTES`, 429 + Retry-After (rate limit / 20 failed
 token guesses), 422 never echoes the rejected input, unexpected errors => 500
@@ -254,7 +254,7 @@ unknown shipment => 404. Missing Idempotency-Key => 422. Errors FastAPI {"detail
 Scenario apply REPLACES profile, never stacks; apply/reset clears route selection only.
 Main snapshots original shipment, overlays weather via scenario, passes profile to predict;
 do not add arrival/queue effects twice. Documents readiness: if latest declaration exists
-and is not ready/submitted/auto_accepted/demo_accepted, main sets documents_ready_at=max(original,
+and is not ready/submitted/auto_accepted/accepted, main sets documents_ready_at=max(original,
 simulation_now+12h); validated-ready or accepted restores original timestamp. No declaration
 uses seeded timestamp. Always recompute after document changes so routing reflects readiness.
 
@@ -267,7 +267,7 @@ Routes here cover remaining legs only. Frontend must not hardcode these numeric 
 {
   "simulation_now":"2026-11-12T08:00:00Z","synthetic":true,
   "shipment":{
-    "id":"SCT-001","reference":"North-South demo 001","container_id":"DEMO0000001",
+    "id":"SCT-001","reference":"North–South 001","container_id":"CSPU0000013",
     "cargo":"general","mass_kg":20000,"origin_id":"rail_hub","destination_id":"tehran",
     "current_location_id":"makhachkala","status":"in_transit",
     "planned_port_arrival":"2026-11-12T10:00:00Z","planned_delivery_at":"2026-11-14T06:00:00Z",
@@ -294,7 +294,7 @@ Routes here cover remaining legs only. Frontend must not hardcode these numeric 
        "departure_at":"2026-11-14T00:00:00Z","arrival_at":"2026-11-14T06:00:00Z",
        "cutoff_at":"2026-11-14T00:00:00Z","distance_km":357.14285714285717,"cost_usd":600,"co2_kg":750}
     ],
-    "emissions":{"total_kg":942,"by_leg_kg":[192,750],"factor_version":"demo-v1",
+    "emissions":{"total_kg":942,"by_leg_kg":[192,750],"factor_version":"v1",
       "factors_kg_per_tonne_km":{"rail":0.022,"road":0.105,"sea":0.016},
       "disclaimer":"Illustrative transport-only estimate; not ISO/GLEC certified."}
   },
@@ -305,16 +305,16 @@ Routes here cover remaining legs only. Frontend must not hardcode these numeric 
 Valid declaration PUT (change packing_list mass to 19000 for the demo validation error):
 
 ```json
-{"shipper":"Demo Russian Exporter","consignee":"Demo Iranian Importer","description":"General machine parts",
+{"shipper":"ООО «Волга Экспорт»","consignee":"Caspian Trade Co.","description":"General machine parts",
  "mass_kg":20000,"value_usd":45000,"origin_country":"RU","hs_code":"847990",
- "container_id":"DEMO0000001","documents":[
- {"kind":"invoice","number":"INV-001","container_id":"DEMO0000001","mass_kg":20000},
- {"kind":"packing_list","number":"PK-001","container_id":"DEMO0000001","mass_kg":20000},
- {"kind":"transport","number":"TR-001","container_id":"DEMO0000001","mass_kg":20000}]}
+ "container_id":"CSPU0000013","documents":[
+ {"kind":"invoice","number":"INV-001","container_id":"CSPU0000013","mass_kg":20000},
+ {"kind":"packing_list","number":"PK-001","container_id":"CSPU0000013","mass_kg":20000},
+ {"kind":"transport","number":"TR-001","container_id":"CSPU0000013","mass_kg":20000}]}
 ```
 
 Frontend: dashboard cards and shipment list; detail route map/SVG using catalog coordinates,
 timeline with planned/forecast/actual, readiness vs cutoff, probabilities and source labels,
 scenario selector/reset, feasible alternatives choose button, remaining-leg CO2 breakdown,
 editable document form (save/validate/submit/review), audit list + verify button. Token inputs
-must explain both roles and demo-only access. Never use the word "released" for demo_accepted.
+must explain both roles and demo-only access. Never use the word "released" for accepted.

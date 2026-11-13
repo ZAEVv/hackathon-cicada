@@ -52,7 +52,7 @@ def test_hand_calculated_rail_leg_uses_tonne_kilometre_dimension() -> None:
 
     assert result["by_leg_kg"] == [pytest.approx(440.0)]
     assert result["total_kg"] == pytest.approx(440.0)
-    assert result["factor_version"] == "demo-v1"
+    assert result["factor_version"] == "v1"
 
 
 def test_contract_example_sea_and_road_legs_sum_to_942_kg() -> None:
@@ -148,7 +148,7 @@ def test_distance_scales_linearly_in_kilometres() -> None:
 def test_factors_version_and_disclaimer_are_frozen_illustrative_values() -> None:
     result = calculate_emissions([_leg("rail", 1.0)], 1_000.0)
 
-    assert result["factor_version"] == "demo-v1"
+    assert result["factor_version"] == "v1"
     assert result["factors_kg_per_tonne_km"] == {
         "rail": 0.022,
         "road": 0.105,

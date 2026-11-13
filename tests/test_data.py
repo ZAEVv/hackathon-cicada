@@ -198,8 +198,8 @@ def test_demo_shipments_and_sct001_contract(demo: dict) -> None:
         assert planned[-1]["destination_id"] == shipment["destination_id"]
 
     sct001 = shipments[0]
-    assert sct001["reference"] == "North-South demo 001"
-    assert sct001["container_id"] == "DEMO0000001"
+    assert sct001["reference"] == "North–South 001"
+    assert sct001["container_id"] == "CSPU0000013"
     assert sct001["origin_id"] == "rail_hub"
     assert sct001["destination_id"] == "tehran"
     assert sct001["current_location_id"] == "makhachkala"

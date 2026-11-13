@@ -11,12 +11,12 @@ from backend.app.schemas import (
     ReviewRequest, RouteId, ShipmentId,
 )
 
-CONTAINER = "DEMO0000001"
+CONTAINER = "CSPU0000013"
 
 
 def payload(mass=20000):
     return {
-        "shipper": "Demo Russian Exporter", "consignee": "Demo Iranian Importer",
+        "shipper": "ООО «Волга Экспорт»", "consignee": "Caspian Trade Co.",
         "description": "General machine parts", "mass_kg": mass,
         "value_usd": 45000, "origin_country": "RU", "hs_code": "847990",
         "container_id": CONTAINER,
@@ -85,8 +85,8 @@ def test_documents_list_cap():
 
 
 def test_review_comment_cap():
-    ReviewRequest.model_validate({"decision": "demo_accepted", "comment": "c" * 1000})
-    rejects(ReviewRequest, {"decision": "demo_accepted", "comment": "c" * 1001}, "string_too_long")
+    ReviewRequest.model_validate({"decision": "accepted", "comment": "c" * 1000})
+    rejects(ReviewRequest, {"decision": "accepted", "comment": "c" * 1001}, "string_too_long")
     assert ReviewRequest.model_validate({"decision": "needs_revision"}).comment == ""
 
 
@@ -166,7 +166,7 @@ def test_lone_surrogate_from_json_text_is_a_validation_error_not_a_crash():
     # validation rejects (our forbidden-character validator is a second line of defence).
     rejects(DeclarationInput, json.loads(raw), TEXT_REJECTED)
     with pytest.raises(ValidationError):
-        ReviewRequest.model_validate(json.loads('{"decision":"demo_accepted","comment":"\\udc00"}'))
+        ReviewRequest.model_validate(json.loads('{"decision":"accepted","comment":"\\udc00"}'))
     with pytest.raises(ValidationError):
         ChooseRouteRequest.model_validate(json.loads('{"route_id":"\\ud83d"}'))
 
@@ -317,8 +317,8 @@ def test_api_flow_payloads_still_validate():
     for doc in blank["documents"]:
         doc.update(number="", container_id="")
     DeclarationInput.model_validate(blank)
-    ReviewRequest.model_validate({"decision": "demo_accepted", "comment": "Checked"})
-    ReviewRequest.model_validate({"decision": "demo_accepted", "comment": ""})
+    ReviewRequest.model_validate({"decision": "accepted", "comment": "Checked"})
+    ReviewRequest.model_validate({"decision": "accepted", "comment": ""})
 
 
 def test_payload_dump_round_trip_is_byte_identical_for_hashing():

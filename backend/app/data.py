@@ -362,8 +362,8 @@ def _event(
 _SHIPMENTS: list[dict[str, Any]] = [
     {
         "id": "SCT-001",
-        "reference": "North-South demo 001",
-        "container_id": "DEMO0000001",
+        "reference": "North–South 001",
+        "container_id": "CSPU0000013",
         "cargo": "general",
         "mass_kg": 20000.0,
         "origin_id": "rail_hub",
@@ -412,8 +412,8 @@ _SHIPMENTS: list[dict[str, Any]] = [
     },
     {
         "id": "SCT-002",
-        "reference": "Olya transfer demo 002",
-        "container_id": "DEMO0000002",
+        "reference": "Olya transfer 002",
+        "container_id": "CSPU0000029",
         "cargo": "general",
         "mass_kg": 20000.0,
         "origin_id": "rail_hub",
@@ -467,8 +467,8 @@ _SHIPMENTS: list[dict[str, Any]] = [
     },
     {
         "id": "SCT-003",
-        "reference": "Olya feeder demo 003",
-        "container_id": "DEMO0000003",
+        "reference": "Olya feeder 003",
+        "container_id": "CSPU0000034",
         "cargo": "general",
         "mass_kg": 20000.0,
         "origin_id": "rail_hub",
@@ -522,8 +522,8 @@ _SHIPMENTS: list[dict[str, Any]] = [
     },
     {
         "id": "SCT-004",
-        "reference": "Eastern line demo 004",
-        "container_id": "DEMO0000004",
+        "reference": "Eastern line 004",
+        "container_id": "CSPU0000040",
         "cargo": "general",
         "mass_kg": 20000.0,
         "origin_id": "rail_hub",
@@ -576,8 +576,8 @@ _SHIPMENTS: list[dict[str, Any]] = [
     },
     {
         "id": "SCT-005",
-        "reference": "Amirabad sea demo 005",
-        "container_id": "DEMO0000005",
+        "reference": "Amirabad sea 005",
+        "container_id": "CSPU0000055",
         "cargo": "general",
         "mass_kg": 20000.0,
         "origin_id": "makhachkala",
@@ -621,8 +621,8 @@ _SHIPMENTS: list[dict[str, Any]] = [
     },
     {
         "id": "SCT-006",
-        "reference": "Turkmenbashi variant demo 006",
-        "container_id": "DEMO0000006",
+        "reference": "Turkmenbashi variant 006",
+        "container_id": "CSPU0000060",
         "cargo": "general",
         "mass_kg": 20000.0,
         "origin_id": "rail_hub",

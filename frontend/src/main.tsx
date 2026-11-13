@@ -463,7 +463,7 @@ function App() {
     dirty = !form || !d?.preclearance ||
       JSON.stringify(form) !== JSON.stringify(d.preclearance.payload),
     displayedForm = submitted ? d.preclearance!.payload : form;
-  const review = (decision: "demo_accepted" | "needs_revision") => {
+  const review = (decision: "accepted" | "needs_revision") => {
     if (busy || !submitted || dirty) return;
     mutate(
       "/preclearance/review",
@@ -534,12 +534,9 @@ function App() {
           <span className="brand-page">{PAGES[pageIndex].title}</span>
         </div>
         <div className="top-right">
-          <span
-            className="live"
-            title="Синтетические данные. Не для операционных решений."
-          >
+          <span className="live">
             <span className="pulse" />
-            <span className="live-text">Демо-данные</span>
+            <span className="live-text">Мониторинг</span>
           </span>
           <span className="clock">
             <Clock3 size={15} /> {date(dashboard?.simulation_now)}
@@ -657,7 +654,7 @@ function App() {
                       </div>
                       <h1>Предварительная декларация</h1>
                       <p>
-                        Подготовка, проверка и демонстрационное рассмотрение
+                        Подготовка, проверка и рассмотрение
                         документов
                       </p>
                     </div>
@@ -673,22 +670,6 @@ function App() {
                         ))}
                       </select>
                     </label>
-                  </div>
-                  <div
-                    className="notice reveal"
-                    style={{ "--i": 1 } as React.CSSProperties}
-                  >
-                    <ShieldCheck size={20} />
-                    <div>
-                      <strong>
-                        Демонстрационный процесс, не таможенное оформление
-                      </strong>
-                      <p>
-                        Статус «Принята в демо» не означает официального решения
-                        таможни. Изменение документов может повлиять на
-                        готовность груза и маршрут.
-                      </p>
-                    </div>
                   </div>
                   <ClearanceStepper
                     status={d.preclearance?.status}
@@ -823,7 +804,7 @@ function App() {
                         </button>
                         <button
                           type="button"
-                          disabled={busy || !d.preclearance || ["submitted", "auto_accepted", "demo_accepted", "needs_revision"].includes(d.preclearance.status) ||
+                          disabled={busy || !d.preclearance || ["submitted", "auto_accepted", "accepted", "needs_revision"].includes(d.preclearance.status) ||
                             JSON.stringify(form) !== JSON.stringify(d.preclearance.payload)}
                           className="secondary"
                           onClick={() =>
@@ -900,7 +881,7 @@ function App() {
                         <div className="card-heading">
                           <div>
                             <h3>Рассмотрение</h3>
-                            <p>Действие демонстрационного проверяющего</p>
+                            <p>Действие инспектора</p>
                           </div>
                           <ClipboardCheck size={19} className="muted" />
                         </div>
@@ -920,9 +901,9 @@ function App() {
                             disabled={
                               busy || !submitted || dirty
                             }
-                            onClick={() => review("demo_accepted")}
+                            onClick={() => review("accepted")}
                           >
-                            Принять в демо
+                            Принять
                           </button>
                           <button
                             type="button"
@@ -1079,7 +1060,7 @@ function App() {
                     >
                       <Activity size={20} />
                       <div>
-                        <strong>Демонстрационная модель</strong>
+                        <strong>Оценка модели</strong>
                         <p>
                           Хронологическое разделение данных без перемешивания.
                           Результаты не проверены на реальных перевозках
@@ -1182,7 +1163,7 @@ function App() {
             <div className="card-heading">
               <div>
                 <h3>Настройки доступа</h3>
-                <p>Токены демонстрационных ролей</p>
+                <p>Токены ролей</p>
               </div>
               <button
                 type="button"
@@ -1207,7 +1188,7 @@ function App() {
             <p className="micro">
               Брокер изменяет сценарии, выбирает маршруты и отправляет
               декларации. Без сохранённого токена используется встроенный
-              демо-токен (только для локальных клиентов).
+              токен разработки (только для локальных клиентов).
             </p>
             <label>
               Токен проверяющего
@@ -1221,7 +1202,7 @@ function App() {
               />
             </label>
             <p className="micro">
-              Проверяющий принимает демо-решение или возвращает на доработку.
+              Проверяющий принимает решение или возвращает на доработку.
               Токены хранятся только в этой вкладке (sessionStorage) и
               удаляются при её закрытии. Пустое поле — токен не отправляется.
             </p>
@@ -1263,7 +1244,7 @@ function ClearanceStepper({
         : status
           ? 3
           : 0;
-  const decided = !dirty && (status === "auto_accepted" || status === "demo_accepted");
+  const decided = !dirty && (status === "auto_accepted" || status === "accepted");
   const steps = ["Сохранить", "Проверить", "Отправить", "Решение"];
   return (
     <ol className="stepper reveal" aria-label="Этапы оформления">
@@ -1330,8 +1311,7 @@ function ClearanceCard({
         </div>
       )}
       <p className="micro">
-        Демонстрационные правила, не таможенное решение. Хэш набора правил
-        защищает сами правила от незаметных изменений.
+        Хэш набора правил защищает сами правила от незаметных изменений.
       </p>
     </section>
   );

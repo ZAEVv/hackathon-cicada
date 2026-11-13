@@ -1,7 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { CountUp } from "../motion";
 import {
-  Clock3,
   Container,
   Leaf,
   Ship,
@@ -96,7 +95,6 @@ const linePath = (pts: { x: number; y: number }[]) =>
 
 // "2026-11-05" -> "05.11"
 const weekLabel = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
-const dateRu = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
 
 function Skeleton({ h, w = "100%" }: { h: number; w?: string }) {
   return <span className="md-skel" style={{ height: h, width: w }} aria-hidden />;
@@ -294,7 +292,7 @@ export function MinimalDashboard({ token }: { token?: string }) {
             <div className="md-card-head">
               <div>
                 <h2>Последние перевозки</h2>
-                <p className="md-muted">Текущие демо-отправки; статус по риску и документам</p>
+                <p className="md-muted">Текущие отправки; статус по риску и документам</p>
               </div>
               <Container size={18} className="md-muted" aria-hidden />
             </div>
@@ -337,12 +335,6 @@ export function MinimalDashboard({ token }: { token?: string }) {
       )}
 
       <footer className="md-foot">
-        <span>
-          <Clock3 size={14} aria-hidden />
-          {ready
-            ? ` Синтетическая история ${dateRu(ready.period_start)} – ${dateRu(ready.period_end)}, не для операционных решений`
-            : " Демо-данные, не для операционных решений"}
-        </span>
         <span>
           <Leaf size={14} aria-hidden /> Оценка CO₂e только для транспорта
         </span>

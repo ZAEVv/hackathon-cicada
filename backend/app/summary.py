@@ -11,7 +11,7 @@ Everything here is synthetic. Two sources are combined:
 CO2e approximation: history rows carry no route, so their emissions are
 ``mass_tonnes * intensity``, where ``intensity`` (kg CO2e per tonne) is the
 mass-weighted average of the current routes: ``sum(route CO2e) / sum(shipment
-tonnes)``. Route CO2e itself uses the ``esg.py`` factors (demo-v1, transport-only,
+tonnes)``. Route CO2e itself uses the ``esg.py`` factors (v1, transport-only,
 remaining legs). Unavailable routes with no legs are excluded from both sums:
 their emissions are unknown, not a zero-emission shipment. Scheduled recovery
 routes still contribute even when their original connection was missed. With no
@@ -28,7 +28,7 @@ from .schemas import SIMULATION_NOW, CorridorSummary, ShipmentDetail
 WEEK = timedelta(days=7)
 RECENT_LIMIT = 10
 # Declaration statuses that mean documents no longer block the shipment.
-DOCS_OK = frozenset({"ready", "submitted", "demo_accepted", "auto_accepted"})
+DOCS_OK = frozenset({"ready", "submitted", "accepted", "auto_accepted"})
 METHODOLOGY = (
     "Периоды считаются неделями назад от SIMULATION_NOW. Дельта сравнивается с предыдущим "
     "равным периодом; если история его не покрывает, дельта не показывается. "

@@ -14,8 +14,8 @@ from backend.app.schemas import AuditEntry, AuditVerification, Declaration
 
 
 NOW = "2026-11-12T08:00:00Z"
-BROKER = {"id": "demo-broker", "role": "broker"}
-REVIEWER = {"id": "demo-reviewer", "role": "reviewer"}
+BROKER = {"id": "dev-broker", "role": "broker"}
+REVIEWER = {"id": "dev-reviewer", "role": "reviewer"}
 SHIPMENT = {"id": "SCT-001", "mass_kg": 20000, "container_id": "C1"}
 PAYLOAD = {"shipper": "Exporter", "consignee": "Importer", "description": "Parts",
            "mass_kg": 20000, "value_usd": 100, "origin_country": "RU", "hs_code": "123456",
@@ -101,7 +101,7 @@ def test_roles_and_missing(db):
     with pytest.raises(PermissionError):
         pc.save_declaration(db, SHIPMENT, PAYLOAD, REVIEWER, NOW)
     with pytest.raises(PermissionError):
-        pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "", BROKER, NOW)
+        pc.review_declaration(db, SHIPMENT["id"], "accepted", "", BROKER, NOW)
     with pytest.raises(KeyError):
         pc.validate_declaration(db, SHIPMENT, BROKER, NOW)
     assert pc.get_declaration(db, SHIPMENT["id"]) is None
@@ -127,8 +127,8 @@ def test_replay_review_and_revision(db):
     submitted = pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW)
     with pytest.raises(ValueError):
         pc.save_declaration(db, SHIPMENT, PAYLOAD, BROKER, NOW)
-    accepted = pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "demo", REVIEWER, NOW)
-    assert accepted["status"] == "demo_accepted"
+    accepted = pc.review_declaration(db, SHIPMENT["id"], "accepted", "demo", REVIEWER, NOW)
+    assert accepted["status"] == "accepted"
     count = len(pc.get_audit(db, SHIPMENT["id"]))
     assert pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW) == submitted
     assert len(pc.get_audit(db, SHIPMENT["id"])) == count
@@ -163,12 +163,12 @@ def test_needs_revision_requires_new_version_before_resubmission(db):
     resubmitted = pc.submit_declaration(db, SHIPMENT["id"], new_key, BROKER, NOW)
     assert resubmitted["status"] == "submitted"
     assert pc.get_declaration(db, SHIPMENT["id"]) == resubmitted
-    assert pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "", REVIEWER, NOW)["status"] == "demo_accepted"
+    assert pc.review_declaration(db, SHIPMENT["id"], "accepted", "", REVIEWER, NOW)["status"] == "accepted"
     assert pc.verify_audit(db, SHIPMENT["id"])["valid"]
 
 
 @pytest.mark.parametrize("field,value", [
-    ("status", "demo_accepted"), ("version", 99), ("updated_at", "2099-01-01T00:00:00Z"),
+    ("status", "accepted"), ("version", 99), ("updated_at", "2099-01-01T00:00:00Z"),
 ])
 def test_audit_detects_independent_metadata_tampering(db, field, value):
     ready(db)
@@ -420,7 +420,7 @@ def test_declaration_with_extra_or_duplicate_keys_is_rejected(db):
         pc.get_declaration(db, SHIPMENT["id"])
     # Duplicate key whose last value equals the genuine one: old parser accepted it.
     text = canonical(declaration)
-    write_declaration(db, '{"status":"demo_accepted",' + text[1:])
+    write_declaration(db, '{"status":"accepted",' + text[1:])
     assert not pc.verify_audit(db, SHIPMENT["id"])["valid"]
 
 
@@ -526,8 +526,8 @@ def test_connections_are_closed_on_success_and_error(db, monkeypatch):
         lambda: pc.validate_declaration(db, SHIPMENT, BROKER, NOW),
         lambda: pc.submit_declaration(db, SHIPMENT["id"], "k", BROKER, NOW),
         lambda: pc.submit_declaration(db, SHIPMENT["id"], "k", BROKER, NOW),  # replay
-        lambda: pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "", REVIEWER, NOW),
-        lambda: pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "", REVIEWER, NOW),  # ValueError
+        lambda: pc.review_declaration(db, SHIPMENT["id"], "accepted", "", REVIEWER, NOW),
+        lambda: pc.review_declaration(db, SHIPMENT["id"], "accepted", "", REVIEWER, NOW),  # ValueError
         lambda: pc.get_audit(db, SHIPMENT["id"]),
         lambda: pc.verify_audit(db, SHIPMENT["id"]),
         lambda: pc.init_db(db),
@@ -661,13 +661,13 @@ def test_input_length_guards(db):
     assert pc.submit_declaration(db, SHIPMENT["id"], "k" * 128, BROKER, NOW)["status"] == "submitted"
 
     with pytest.raises(ValueError, match="^Review comment is too long$"):
-        pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "c" * 1001, REVIEWER, NOW)
+        pc.review_declaration(db, SHIPMENT["id"], "accepted", "c" * 1001, REVIEWER, NOW)
     for bad_comment in (None, 5, "bad\udfff"):
         with pytest.raises(ValueError, match="^Invalid review comment$"):
-            pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", bad_comment, REVIEWER, NOW)
+            pc.review_declaration(db, SHIPMENT["id"], "accepted", bad_comment, REVIEWER, NOW)
     assert pc.get_declaration(db, SHIPMENT["id"])["status"] == "submitted"
-    reviewed = pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "c" * 1000, REVIEWER, NOW)
-    assert reviewed["status"] == "demo_accepted"
+    reviewed = pc.review_declaration(db, SHIPMENT["id"], "accepted", "c" * 1000, REVIEWER, NOW)
+    assert reviewed["status"] == "accepted"
     assert pc.verify_audit(db, SHIPMENT["id"])["valid"]
 
 
@@ -697,7 +697,7 @@ def test_tampered_submission_record_is_never_replayed(db, tamper):
     else:
         response = copy.deepcopy(submitted)
         if tamper == "status":
-            response["status"] = "demo_accepted"
+            response["status"] = "accepted"
         elif tamper == "payload":
             response["payload"]["shipper"] = "Injected"
         elif tamper == "extra_key":
@@ -716,13 +716,13 @@ def test_replay_after_review_returns_original_submission(db):
     # after the declaration moved on; clients read current state via GET.
     ready(db)
     submitted = pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW)
-    pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "ok", REVIEWER, NOW)
+    pc.review_declaration(db, SHIPMENT["id"], "accepted", "ok", REVIEWER, NOW)
     replay = pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW)
     assert replay == submitted and replay["status"] == "submitted"
     Declaration(**replay)
 
 
-TRUSTED = "Demo Russian Exporter"
+TRUSTED = "ООО «Волга Экспорт»"
 
 
 def _trusted_ready(db):
@@ -766,7 +766,7 @@ def test_auto_accept_audit_valid_replay_and_tamper_detection(db):
     assert pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW, SHIPMENT) == submitted
     assert len(pc.get_audit(db, SHIPMENT["id"])) == len(audit)
     with pytest.raises(ValueError):
-        pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "", REVIEWER, NOW)
+        pc.review_declaration(db, SHIPMENT["id"], "accepted", "", REVIEWER, NOW)
     # Editing the stored clearance on the declaration row is detected.
     declaration = read_declaration(db)
     declaration["clearance"]["results"][0]["passed"] = False
@@ -788,5 +788,5 @@ def test_untrusted_shipper_stays_submitted_and_reviewable(db):
     ready(db)
     submitted = pc.submit_declaration(db, SHIPMENT["id"], "key", BROKER, NOW, SHIPMENT)
     assert submitted["status"] == "submitted" and submitted["clearance"]["decision"] == "manual_review"
-    assert pc.review_declaration(db, SHIPMENT["id"], "demo_accepted", "", REVIEWER, NOW)["status"] == "demo_accepted"
+    assert pc.review_declaration(db, SHIPMENT["id"], "accepted", "", REVIEWER, NOW)["status"] == "accepted"
     assert pc.verify_audit(db, SHIPMENT["id"])["valid"]

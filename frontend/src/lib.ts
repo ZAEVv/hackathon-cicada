@@ -46,7 +46,7 @@ export const statuses: Record<string, string> = {
   ready: "Готова к отправке",
   submitted: "На рассмотрении",
   auto_accepted: "Одобрена автоматически",
-  demo_accepted: "Принята в демо",
+  accepted: "Принята",
   needs_revision: "На доработке",
 };
 export const scenarios: Record<string, string> = {
@@ -112,8 +112,8 @@ export const translations: Record<string, string> = {
     "Вероятность оценена по разбросу ошибок прогноза на синтетике; калибровка не гарантирована",
   "Synthetic classifier estimate; not guaranteed calibrated":
     "Оценка синтетического классификатора; калибровка не гарантирована",
-  "Readiness after demo cutoff": "Готовность после демо-дедлайна",
-  "Readiness within demo cutoff": "Готовность до демо-дедлайна",
+  "Readiness after demo cutoff": "Готовность после дедлайна",
+  "Readiness within demo cutoff": "Готовность до дедлайна",
   "Planned route": "Плановый маршрут",
   "Planned Caspian crossing": "Плановый переход через Каспий",
   "Next-departure recovery": "Восстановление на следующем рейсе",
@@ -129,8 +129,8 @@ export const translations: Record<string, string> = {
     "Морская линия закрыта: груз накапливается",
   "Diverted flow from closed service":
     "Переток грузопотока с закрытой линии",
-  "Demo shipments handled in this window":
-    "В окне обрабатываются демо-перевозки",
+  "Shipments handled in this window":
+    "В окне обрабатываются перевозки",
   "Shipment held: route unavailable":
     "Груз задержан: маршрут недоступен",
   "Backlog carried over": "Накопленная очередь обработки",
@@ -162,7 +162,7 @@ export const translations: Record<string, string> = {
   "Origin country is not on the allowed list":
     "Страна происхождения не в списке разрешённых",
   // 403/404/409 details the API returns (shown in error toasts).
-  "Valid demo bearer token required": "Нужен действующий демо-токен доступа",
+  "Valid bearer token required": "Нужен действующий токен доступа",
   "Broker role required": "Требуется роль логиста",
   "broker role required": "Требуется роль логиста",
   "reviewer role required": "Требуется роль проверяющего",
@@ -201,8 +201,8 @@ export const translations: Record<string, string> = {
     "Проверяется только целостность хеш-цепочки; это не подтверждение подлинности и не таможенное решение.",
   "Illustrative transport-only estimate; not ISO/GLEC certified.":
     "Иллюстративная оценка только для перевозки; не сертифицирована по ISO/GLEC.",
-  "Synthetic forecast: seeded background load and demo capacities; not real port statistics.":
-    "Синтетический прогноз: сгенерированная фоновая загрузка и демо-мощности; не реальная статистика портов.",
+  "Synthetic forecast: seeded background load and modelled capacities; not real port statistics.":
+    "Синтетический прогноз: сгенерированная фоновая загрузка и расчётные мощности; не реальная статистика портов.",
 };
 export const translate = (value: string) => lookup(translations, value) ?? value;
 export const portName = (port: Port) => lookup(portNames, port.id) ?? port.name;
@@ -343,8 +343,8 @@ export const TOKEN_KEYS = {
   reviewer: "sct-reviewer",
 } as const;
 export const DEFAULT_TOKENS = {
-  broker: "demo-broker-token",
-  reviewer: "demo-reviewer-token",
+  broker: "dev-broker-token",
+  reviewer: "dev-reviewer-token",
 } as const;
 // Tokens live only in sessionStorage (cleared with the tab); storage access
 // can throw (private mode, blocked storage), so every call is guarded.
@@ -383,9 +383,8 @@ export const post = (body?: unknown): RequestInit => ({
   method: "POST",
   ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
 });
-// A new declaration starts pre-filled with illustrative demo values (a trusted
-// demo shipper, consistent documents), so the walkthrough needs no typing: the
-// presenter changes one field to show a mismatch or the manual-review path.
+// A new declaration starts pre-filled with illustrative values (a trusted
+// shipper, consistent documents), so no typing is needed to try the flow.
 export function initialPayload(d: Detail): Payload {
   const numbers: Record<string, string> = {
     invoice: "INV",
@@ -393,8 +392,8 @@ export function initialPayload(d: Detail): Payload {
     transport: "CMR",
   };
   return {
-    shipper: "Demo Russian Exporter",
-    consignee: "Demo Iranian Importer",
+    shipper: "ООО «Волга Экспорт»",
+    consignee: "Caspian Trade Co.",
     description: "General machine parts",
     mass_kg: d.shipment.mass_kg,
     value_usd: 45000,
