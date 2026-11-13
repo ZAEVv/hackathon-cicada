@@ -46,7 +46,7 @@ Start API and frontend using README commands; both tokens explicitly labeled dem
 4. Choose a feasible alternative. Compare against baseline, with demo-not-booking label.
 5. Save declaration with packing-list mass mismatch; validation shows exact field error.
    Save corrected version, validate, submit with idempotency key; retry returns same result.
-6. Reviewer token records `demo_accepted`; audit verifies. Never label this customs release.
+6. Reviewer token records `accepted`; audit verifies. Never label this customs release.
 7. Reset scenario: baseline forecasts return and route choice clears; documents/audit survive.
 
 ## Gates

@@ -9,10 +9,10 @@ from backend.app import hubs, routing
 from backend.app.main import create_app
 from backend.app.schemas import SIMULATION_NOW, HubForecast
 
-BROKER = {"Authorization": "Bearer demo-broker-token"}
-REVIEWER = {"Authorization": "Bearer demo-reviewer-token"}
+BROKER = {"Authorization": "Bearer dev-broker-token"}
+REVIEWER = {"Authorization": "Bearer dev-reviewer-token"}
 URL = "/api/hubs/forecast"
-ENV_VARS = ("DEMO_BROKER_TOKEN", "DEMO_REVIEWER_TOKEN", "DEMO_DISABLE_DEFAULT_TOKENS", "ENABLE_API_DOCS")
+ENV_VARS = ("BROKER_TOKEN", "REVIEWER_TOKEN", "DISABLE_DEFAULT_TOKENS", "ENABLE_API_DOCS")
 
 
 @pytest.fixture(autouse=True)
@@ -181,7 +181,7 @@ def test_authentication_and_unknown_shipment(client):
         response = client.get(URL, params={"shipment_id": "SCT-001"}, headers=headers)
         assert response.status_code == 401
         assert response.headers["www-authenticate"] == "Bearer"
-        assert response.json() == {"detail": "Valid demo bearer token required"}
+        assert response.json() == {"detail": "Valid bearer token required"}
     assert client.get(URL, params={"shipment_id": "SCT-001"}, headers=REVIEWER).status_code == 200
     missing = client.get(URL, params={"shipment_id": "SCT-404-unknown"}, headers=BROKER)
     assert missing.status_code == 404

@@ -14,7 +14,7 @@ from numbers import Real
 from typing import Any
 
 # kg CO2e / (tonne * km), illustrative demo values from the frozen contract.
-FACTOR_VERSION = "demo-v1"
+FACTOR_VERSION = "v1"
 FACTORS_KG_PER_TONNE_KM: dict[str, float] = {
     "rail": 0.022,
     "road": 0.105,

@@ -156,7 +156,7 @@ class Leg(Contract):
 class Emissions(Contract):
     total_kg: float
     by_leg_kg: list[float]
-    factor_version: str = "demo-v1"
+    factor_version: str = "v1"
     factors_kg_per_tonne_km: dict[str, float] = Field(
         default_factory=lambda: {"rail": 0.022, "road": 0.105, "sea": 0.016}
     )
@@ -264,7 +264,7 @@ class Declaration(Contract):
     id: str
     shipment_id: str
     version: int
-    status: Literal["draft", "validation_failed", "ready", "submitted", "auto_accepted", "demo_accepted",
+    status: Literal["draft", "validation_failed", "ready", "submitted", "auto_accepted", "accepted",
                     "needs_revision"]
     payload: StoredDeclarationInput
     validation: ValidationResult
@@ -275,7 +275,7 @@ class Declaration(Contract):
 
 
 class ReviewRequest(Contract):
-    decision: Literal["demo_accepted", "needs_revision"]
+    decision: Literal["accepted", "needs_revision"]
     comment: _text(1000, multiline=True) = ""
 
 

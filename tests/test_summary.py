@@ -6,8 +6,8 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import create_app
 
-BROKER = {"Authorization": "Bearer demo-broker-token"}
-ENV_VARS = ("DEMO_BROKER_TOKEN", "DEMO_REVIEWER_TOKEN", "DEMO_DISABLE_DEFAULT_TOKENS", "ENABLE_API_DOCS")
+BROKER = {"Authorization": "Bearer dev-broker-token"}
+ENV_VARS = ("BROKER_TOKEN", "REVIEWER_TOKEN", "DISABLE_DEFAULT_TOKENS", "ENABLE_API_DOCS")
 
 
 @pytest.fixture(autouse=True)

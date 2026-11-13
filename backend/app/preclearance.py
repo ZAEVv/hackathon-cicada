@@ -92,7 +92,7 @@ _DECLARATION_KEYS = frozenset({"id", "shipment_id", "version", "status", "payloa
 _ENTRY_KEYS = frozenset({"sequence", "declaration_id", "action", "actor", "at", "payload",
                          "previous_hash", "hash"})
 _OPTIONAL_DECLARATION_KEYS = frozenset({"clearance"})
-_STATUSES = frozenset({"draft", "validation_failed", "ready", "submitted", "auto_accepted", "demo_accepted",
+_STATUSES = frozenset({"draft", "validation_failed", "ready", "submitted", "auto_accepted", "accepted",
                        "needs_revision"})
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 
@@ -363,10 +363,10 @@ def _validate(payload, shipment):
     return {"valid": not issues, "issues": issues}
 
 
-RULESET_ID = "demo-rules-v1"
+RULESET_ID = "rules-v1"
 # Illustrative demo parameters only; not real customs lists.
 MANUAL_CONTROL_HS_PREFIXES = ("93", "2844", "3601", "3602", "3603", "3604")
-TRUSTED_SHIPPERS = ("Demo Russian Exporter", "Demo Kazakh Exporter", "Demo Iranian Exporter")
+TRUSTED_SHIPPERS = ("ООО «Волга Экспорт»", "ТОО «Степь Экспорт»", "Persian Caspian Export")
 ALLOWED_ORIGINS = ("RU", "KZ", "IR", "AZ", "TM", "UZ")
 VALUE_PER_KG_BAND_USD = (0.05, 500.0)
 MASS_TOLERANCE_KG = 1
@@ -442,7 +442,7 @@ def validate_declaration(db_path: str, shipment: dict, actor: dict, now: str) ->
     key = _audit_key()
     with _session(db_path, "BEGIN IMMEDIATE") as db:
         declaration = _required(db, shipment["id"])
-        if declaration["status"] in ("submitted", "auto_accepted", "demo_accepted", "needs_revision"):
+        if declaration["status"] in ("submitted", "auto_accepted", "accepted", "needs_revision"):
             raise ValueError("Save a draft before validating")
         try:
             declaration["validation"] = _validate(declaration["payload"], shipment)
@@ -507,7 +507,7 @@ def submit_declaration(db_path: str, shipment_id: str, idempotency_key: str, act
 
 def review_declaration(db_path: str, shipment_id: str, decision: str, comment: str, actor: dict, now: str) -> dict:
     _role(actor, "reviewer")
-    if decision not in ("demo_accepted", "needs_revision"):
+    if decision not in ("accepted", "needs_revision"):
         raise ValueError("Invalid review decision")
     if not isinstance(comment, str):
         raise ValueError("Invalid review comment")

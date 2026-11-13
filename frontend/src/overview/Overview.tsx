@@ -416,7 +416,7 @@ export function Overview({
               <strong>
                 <CountUp value={summary.total} />
               </strong>
-              <small>В демонстрационном контуре</small>
+              <small>В контуре мониторинга</small>
             </div>
             <div className="tile glow">
               <span>Высокий риск</span>
@@ -434,15 +434,11 @@ export function Overview({
             </div>
             <div className="tile glow">
               <span>Источник данных</span>
-              <strong>{dashboard.synthetic ? "Демо" : "API"}</strong>
+              <strong>{dashboard.synthetic ? "Встроенный" : "API"}</strong>
               <small>Фиксированное время симуляции</small>
             </div>
           </div>
         )}
-        <p className="demo-note">
-          <span className="pulse" /> Синтетические данные. Не для операционных
-          решений.
-        </p>
       </aside>
 
       <section className="ov-center" aria-label="Схема маршрута">
@@ -835,9 +831,6 @@ export function Overview({
                 ) : (
                   <div className="empty-small">Доступных альтернатив нет</div>
                 )}
-                <p className="micro">
-                  Выбор моделируется локально и не является бронированием.
-                </p>
               </section>
 
               <section className="card glow reveal" style={order(7)}>
@@ -940,8 +933,7 @@ export function Overview({
                 {d.scenario.wave_height_m != null &&
                   ` · волнение сценария: ${fmt(d.scenario.wave_height_m, 1)} м`}{" "}
                 · прогноз: {translate(d.prediction.data_source)},{" "}
-                {d.prediction.model_version}. Расписание и показатели
-                демонстрационные.
+                {d.prediction.model_version}.
               </span>
             </div>
           </div>
