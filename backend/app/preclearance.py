@@ -616,9 +616,9 @@ def _local_hashes(rows):
 
 
 def ledger_status(db_path: str, shipment_id: str) -> dict:
-    """Per-witness view of a shipment's chain head (simulated ledger, see ``ledger.py``)."""
+    """Per-witness view of a shipment's chain head (witness ledger, see ``ledger.py``)."""
     with _session(db_path) as db:
         rows = db.execute("SELECT sequence, entry_json FROM audit_entries WHERE shipment_id = ? ORDER BY sequence", (shipment_id,)).fetchall()
     report = ledger.compare(db_path, shipment_id, _local_hashes(rows))
     report.pop("first_invalid_sequence")
-    return {"shipment_id": shipment_id, **report, "disclaimer": ledger.DISCLAIMER}
+    return {"shipment_id": shipment_id, **report, "disclaimer": ledger.disclaimer()}

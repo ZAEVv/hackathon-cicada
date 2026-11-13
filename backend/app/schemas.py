@@ -296,7 +296,7 @@ LedgerReason = Literal["hash_mismatch", "truncated", "chain_deleted", "unanchore
 
 
 class LedgerCheck(Contract):
-    """Simulated witness-ledger comparison (in-process nodes; prototype)."""
+    """Witness-ledger comparison (in-process or networked witness nodes; prototype)."""
     status: LedgerState
     reason: LedgerReason | None = None
     anchored: bool
@@ -325,10 +325,13 @@ class LedgerNode(Contract):
     signature_valid: bool | None = None
     in_sync: bool
     state: Literal["in_sync", "behind", "diverged", "invalid_signature", "unavailable"]
+    # Network mode only: why the node could not be used (no secrets, no addresses).
+    error: Literal["timeout", "unreachable", "rejected", "bad_reply"] | None = None
 
 
 class LedgerStatus(LedgerCheck):
     shipment_id: str
+    mode: Literal["in_process", "network"] = "in_process"
     nodes: list[LedgerNode]
     disclaimer: str
 
