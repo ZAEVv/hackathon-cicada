@@ -45,8 +45,21 @@ services:
       LEDGER_WITNESS_KEYS: ${LEDGER_WITNESS_KEYS:-}
       # Witness ledger: three separate node services on the internal "ledger" network.
       LEDGER_WITNESS_URLS: ${LEDGER_WITNESS_URLS:-witness-1=http://witness-1:8100,witness-2=http://witness-2:8100,witness-3=http://witness-3:8100}
+      # Corridor graph (Neo4j). An empty GRAPH_DB_URL selects the in-memory networkx fallback.
+      GRAPH_DB_URL: ${GRAPH_DB_URL-bolt://graph:7687}
+      GRAPH_DB_USER: ${GRAPH_DB_USER:-neo4j}
+      GRAPH_DB_PASSWORD: ${GRAPH_DB_PASSWORD:-caspian-graph-local}
     networks: [default, ledger]
-    depends_on: [witness-1, witness-2, witness-3]
+    depends_on:
+      graph:
+        condition: service_healthy
+      # Witnesses only need to be started: the API tolerates an unreachable node.
+      witness-1:
+        condition: service_started
+      witness-2:
+        condition: service_started
+      witness-3:
+        condition: service_started
     volumes:
       - caspian-data:/data
     restart: unless-stopped
@@ -54,6 +67,31 @@ services:
     tmpfs:
       - /tmp
     cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  # Corridor network as a graph (hubs + scheduled services), queried with Cypher by the API.
+  # Internal only: no published ports; reachable from the app as bolt://graph:7687.
+  graph:
+    image: neo4j:5.26.10-community
+    environment:
+      NEO4J_AUTH: neo4j/${GRAPH_DB_PASSWORD:-caspian-graph-local}
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 128m
+      NEO4J_server_jvm_additional: -XX:+ExitOnOutOfMemoryError
+    mem_limit: 1280m
+    volumes:
+      - caspian-graph:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 10
+    restart: unless-stopped
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER]
     security_opt:
       - no-new-privileges:true
 
@@ -88,6 +126,7 @@ networks:
 
 volumes:
   caspian-data:
+  caspian-graph:
   witness-1-data:
   witness-2-data:
   witness-3-data:

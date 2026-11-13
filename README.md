@@ -24,6 +24,9 @@ SQLite лежит в томе `caspian-data` (сброс чистой БД: `doc
 `ledger` без опубликованных портов и без выхода наружу, с тем же hardening и healthcheck.
 Опциональные переменные (`BROKER_TOKEN`, `REVIEWER_TOKEN`, `DISABLE_DEFAULT_TOKENS`,
 `ENABLE_API_DOCS`, `AUDIT_HMAC_KEY`, `LEDGER_WITNESS_KEYS`, `LEDGER_WITNESS_URLS`) передаются из окружения или `.env` рядом с `docker-compose.yml`.
+Рядом поднимается сервис `graph` (Neo4j 5 Community, heap 512 МБ + page cache 128 МБ, том
+`caspian-graph`, порты наружу не публикуются); `app` ждёт его healthcheck. Пароль —
+`GRAPH_DB_PASSWORD` (по умолчанию локальный `caspian-graph-local`), см. «Граф коридора».
 
 ### Без Docker
 
@@ -137,13 +140,68 @@ docker compose start witness-2 witness-3
   18:00Z, $1 800, 1 613 кг CO₂e) и через Амирабад (ETA 15 ноября 10:00Z, $2 200, 445 кг CO₂e);
   на карте узлов — переток на Олю (≈ 96 %) и Амирабад (≈ 99 %).
 
+## Граф коридора (Neo4j)
+
+Сеть коридора — это граф по своей природе: узлы (порты, терминалы) и расписанные сервисы между
+ними, а вопрос маршрутизации — «какие цепочки сервисов ведут из A в B». Поэтому топология хранится
+в графовой БД (Neo4j 5 Community, драйвер `neo4j`) и перебирается Cypher-запросом, а проверка
+расписаний (cutoff, обработка, вместимость, тип груза) остаётся в Python (`routing._schedule`).
+
+Модель (`backend/app/graphdb.py`):
+
+```
+(:Hub {id, name, country, lat, lon, kind})
+  -[:SERVICE {id, mode, distance_km, duration_hours, departures[], cutoff_hours,
+              handling_hours, capacity_tonnes, cost_usd, allowed_cargo[]}]->
+(:Hub)
+```
+
+Сервис — связь, а не узел: у него ровно один пункт отправления и назначения, расписание — плоский
+список ISO-времён (допустимое list-свойство), параллельные сервисы — параллельные связи, а путь из
+`:SERVICE` сразу является цепочкой сервисов. Каталог загружается при старте API идемпотентно
+(`MERGE` + удаление устаревших узлов и связей; ограничение уникальности `Hub.id`).
+
+Запрос путей (при «Закрытии» заблокированные сервисы отсекаются в самом запросе):
+
+```cypher
+MATCH p = (o:Hub {id: $origin})-[:SERVICE*1..8]->(d:Hub {id: $destination})
+WHERE none(r IN relationships(p) WHERE r.id IN $blocked)
+  AND all(i IN range(0, size(nodes(p)) - 2) WHERE NOT nodes(p)[i] IN nodes(p)[i + 1..])
+RETURN [r IN relationships(p) | r.id] AS service_ids
+```
+
+Например, Махачкала → Тегеран при закрытии `sea-main`: `[transfer-olya, sea-olya, road-final]` и
+`[sea-mak-amirabad, rail-amirabad]`. Второй предикат требует простой путь (без повторного узла),
+как `networkx.all_simple_paths`; предел 8 плеч не отсекает ни одного пути каталога (8 узлов).
+
+Переменные: `GRAPH_DB_URL` (например `bolt://graph:7687`), `GRAPH_DB_USER` (`neo4j`),
+`GRAPH_DB_PASSWORD`. **Резерв:** если `GRAPH_DB_URL` не задан или Neo4j недоступен при старте,
+API пишет строку в лог и использует прежний in-memory `networkx`; если БД пропала во время работы,
+запрос отвечается через `networkx` (лог), при восстановлении — снова через Neo4j. Активный бэкенд
+виден в `GET /api/health` (`"graph_backend": "neo4j" | "networkx"`) и в строке источников
+карточки перевозки. Без Docker (`dev.sh`) по умолчанию работает `networkx`; в Docker — Neo4j
+(`GRAPH_DB_URL=` пустым отключает его).
+
+Паритет: `tests/test_graphdb.py` сравнивает Neo4j и networkx на всех парах узлов × всех вариантах
+блокировок и сквозным прогоном API по всем перевозкам × всем сценариям (результаты должны совпасть
+байт в байт). Тесты с Neo4j запускаются при `GRAPH_DB_TEST_URL` (одноразовый экземпляр, данные
+`:Hub/:SERVICE` перезаписываются):
+
+```bash
+docker run -d --rm --name sct-graph-test -p 127.0.0.1:7687:7687 \
+  -e NEO4J_AUTH=neo4j/parity-test-pw neo4j:5.26.10-community
+GRAPH_DB_TEST_URL=bolt://127.0.0.1:7687 GRAPH_DB_TEST_PASSWORD=parity-test-pw \
+  OMP_NUM_THREADS=1 .venv/bin/python -m pytest -q tests/test_graphdb.py
+docker rm -f sct-graph-test
+```
+
 ## API
 
 Все маршруты, кроме `/api/health`, требуют bearer-токен.
 
 | Метод и путь | Назначение |
 |---|---|
-| `GET /api/health` | Проверка (публичный) |
+| `GET /api/health` | Проверка (публичный); `graph_backend`: `neo4j` или `networkx` |
 | `GET /api/catalog` | Узлы и сервисы каталога |
 | `GET /api/dashboard` | Перевозки, риски, сводка для «Обзора» |
 | `GET /api/shipments/{id}` | Двойник перевозки: погода, сценарий, прогноз, маршрут, альтернативы, декларация |
