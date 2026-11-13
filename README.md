@@ -6,6 +6,8 @@
 
 Полный разбор устройства проекта и ответы на вопросы жюри: [docs/PROJECT_GUIDE_RU.md](docs/PROJECT_GUIDE_RU.md).
 
+**Инструкция по использованию: [docs/USAGE_RU.md](docs/USAGE_RU.md).**
+
 Как мы это делали, что выучить к защите и презентация: [docs/HOW_WE_BUILT_RU.md](docs/HOW_WE_BUILT_RU.md), [docs/presentation/](docs/presentation/) (PDF, HTML и текст выступления).
 
 ## Запуск
